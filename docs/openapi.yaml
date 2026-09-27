@@ -6,11 +6,10 @@ info:
   description: |
     REST API of the Roundcube plugin `identity_api`.
 
-    **Base URL.** Roundcube has no URL routing, so resources are addressed with the `_path` query
-    parameter: `https://webmail.example.org/?_task=identity_api&_path=/v1/identities`.
-    Query parameters can follow with `&` (or `?`, which is also accepted inside `_path`).
-    With a rewrite rule (see the README), the same resources are available as
-    `https://webmail.example.org/api/identity/v1/identities`.
+    **Base URL.** `<roundcube-url>/api/identity`, e.g.
+    `https://webmail.example.org/api/identity/v1/identities`. The web server maps these URLs to
+    Roundcube with a rewrite rule (see the README); Roundcube shows the actual API URL under
+    *Settings → Preferences → Shop address API*.
 
     **Authentication.** Every request needs a personal access token, created by the user in
     Roundcube under *Settings → Preferences → Shop address API*:
@@ -31,13 +30,8 @@ info:
   contact:
     url: https://github.com/michael-dev/ff-rc-identity
 servers:
-  - url: 'https://{host}/?_task=identity_api&_path='
-    description: Query form, works without server configuration
-    variables:
-      host:
-        default: webmail.example.org
   - url: 'https://{host}/api/identity'
-    description: Pretty URLs, needs a rewrite rule
+    description: Roundcube at the root of its host (the default API location)
     variables:
       host:
         default: webmail.example.org
@@ -111,7 +105,7 @@ paths:
           description: Created
           headers:
             Location:
-              description: URL of the new identity (relative)
+              description: URL of the new identity, relative to the request URL (e.g. `identities/42`)
               schema: { type: string }
             Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
             Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }

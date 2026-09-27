@@ -7,7 +7,7 @@
  * (e.g. m-bookshop-2026-k3x9q2ab@example.org) on the fly, used by the
  * "Shop-Adressen" browser extension.
  *
- * Endpoint: <roundcube-url>/?_task=identity_api&_path=/v1/... (see docs/openapi.yaml)
+ * Endpoint: <roundcube-url>/api/identity/v1/... (rewrite rule, see README and docs/openapi.yaml)
  * Auth:     header "Authorization: Bearer <token>" (or "X-Identity-Api-Token: <token>")
  *
  * Tokens are managed by the user in Settings > Preferences > Shop address API.
@@ -46,6 +46,9 @@ class identity_api extends rcube_plugin
     /** @var array|null Status of the token used for the current API request */
     private $token_status;
 
+    /** @var bool Request path ends with "/" (for relative Location headers) */
+    private $trailing_slash = false;
+
     public function init()
     {
         $this->rc = rcmail::get_instance();
@@ -54,7 +57,7 @@ class identity_api extends rcube_plugin
         $this->add_hook('startup', [$this, 'startup']);
 
         if ($this->rc->task == 'settings') {
-            $this->add_texts('localization/', ['copy', 'copied', 'noexisting']);
+            $this->add_texts('localization/', ['copy', 'copied', 'noexisting', 'apiunreachable']);
             $this->add_hook('preferences_sections_list', [$this, 'prefs_sections']);
             $this->add_hook('preferences_list', [$this, 'prefs_list']);
             $this->add_hook('preferences_save', [$this, 'prefs_save']);
@@ -256,13 +259,8 @@ class identity_api extends rcube_plugin
     {
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-        // Clients that append query parameters to "...&_path=/v1/identities" with
-        // "?" put them into _path, e.g. OpenAPI generators with the query form URL.
-        if (($pos = strpos($path, '?')) !== false) {
-            parse_str(substr($path, $pos + 1), $query);
-            $_GET += $query;
-            $path = substr($path, 0, $pos);
-        }
+        // the rewrite rule maps <api-url>/v1/... to ?_task=identity_api&_path=/v1/...
+        $this->trailing_slash = substr($path, -1) === '/';
         $path = '/' . trim($path, '/');
 
         foreach (self::ROUTES as $regex => $handlers) {
@@ -325,7 +323,9 @@ class identity_api extends rcube_plugin
         $identity = $this->create_identity($user);
         $identity = $this->rest_identity($identity + ['parsed' => $this->generator($user)->parse($identity['email'])]);
 
-        $this->send(201, $identity, ['Location' => './?_task=' . self::TASK . '&_path=/v1/identities/' . $identity['id']]);
+        // relative to the request URL (<api-url>/v1/identities), which only the client knows for sure
+        $location = ($this->trailing_slash ? '' : 'identities/') . $identity['id'];
+        $this->send(201, $identity, ['Location' => $location]);
     }
 
     private function rest_get(rcube_user $user, $id)
@@ -700,22 +700,18 @@ class identity_api extends rcube_plugin
             ],
         ];
 
-        // connection details
-        $url = preg_replace('/[?#].*$/', '', $this->rc->url([], true, true));
-        $url = preg_replace('/index\.php$/', '', $url);
-        // behind a TLS terminating proxy the server side URL can be wrong, use the browser's
-        if (method_exists($this->rc->output, 'add_script')) {
-            $this->rc->output->add_script("var u = document.getElementById('identityapi-url');"
-                . " if (u) u.value = location.href.replace(/[?#].*$/, '').replace(/index\\.php$/, '');", 'docready');
-        }
-        $input = new html_inputfield(['id' => 'identityapi-url', 'size' => 50, 'readonly' => 'readonly']);
+        // connection details: URL of the REST API (identity_api.js resolves a relative
+        // setting against the browser's address and checks that the API answers there)
+        $api   = $this->api_url();
+        $input = new html_inputfield(['id' => 'identityapi-url', 'size' => 50, 'readonly' => 'readonly', 'data-api' => $api]);
 
         $blocks['connection'] = [
             'name'    => $this->gettext('connection'),
             'options' => [
                 'url' => [
-                    'title'   => html::label('identityapi-url', rcube::Q($this->gettext('webmailurl'))),
-                    'content' => $input->show($url),
+                    'title'   => html::label('identityapi-url', rcube::Q($this->gettext('apiurl'))),
+                    'content' => $input->show($api)
+                        . html::div(['id' => 'identityapi-urlcheck', 'class' => 'hint'], ''),
                 ],
             ],
         ];
@@ -735,7 +731,7 @@ class identity_api extends rcube_plugin
             $button  = html::tag('button', ['type' => 'button', 'class' => 'button btn btn-secondary',
                 'onclick' => "this.parentNode.querySelector('.hint').textContent = $missing; return false"],
                 rcube::Q($this->gettext('connect')));
-            $connect = html::div(['id' => 'identityapi-connect', 'data-token' => $new],
+            $connect = html::div(['id' => 'identityapi-connect', 'data-token' => $new, 'data-api' => $api],
                 $button . html::div('hint', rcube::Q($this->gettext('connecthint'))));
 
             $blocks['connection']['options']['newtoken'] = [
@@ -1038,6 +1034,17 @@ class identity_api extends rcube_plugin
     // Helpers
 
     /** Generator for the user's pattern (or the admin pattern / a given one). */
+    /** Base URL of the REST API, relative to Roundcube's URL or absolute (identity_api_url). */
+    private function api_url()
+    {
+        $url = trim((string) $this->rc->config->get('identity_api_url', 'api/identity/'));
+        if ($url === '' || !preg_match('~^(https?://[^/?#]+)?/?[^?#]*$~i', $url)) {
+            $url = 'api/identity/';
+        }
+
+        return rtrim($url, '/') . '/';
+    }
+
     private function generator(rcube_user $user = null, $template = null)
     {
         return new identity_api_generator([

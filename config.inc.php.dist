@@ -3,6 +3,11 @@
 // Identity API plugin configuration
 // Copy to config.inc.php and adjust.
 
+// URL of the REST API, relative to Roundcube's URL or absolute. The web server
+// maps it to Roundcube with a rewrite rule, see README. Shown to the users and
+// taken over by the browser extension when connecting.
+$config['identity_api_url'] = 'api/identity/';
+
 // Users configure their domains in Settings > Preferences > Shop address API.
 // The first entry is the default, further entries can be selected in the
 // browser extension.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1
+
+* **The REST API is only used through its own URL** (`<roundcube-url>/api/identity/v1/…`, setting
+  `identity_api_url`). The web server needs the rewrite rule from the README, tested in CI with
+  nginx and Apache (PHP-FPM); Apache needs `CGIPassAuth On` for the `Authorization` header.
+* Settings page: shows the API URL and warns if the API doesn't answer there.
+* Extension: the options take the API URL (e.g. `https://webmail.example.org/api/identity/`) instead
+  of the webmail URL; "Connect" takes it over from the settings page. After updating from 2.0, click
+  "Connect" once more or enter the API URL in the options.
+* `Location` of a new identity is relative to the request URL (`identities/42`).
+
 ## 2.0
 
 First public release.

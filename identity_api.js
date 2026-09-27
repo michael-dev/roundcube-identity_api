@@ -2,6 +2,26 @@
  * identity_api: address generator in Settings > Preferences > Shop address API.
  * Works in any browser, e.g. Firefox on iOS where extensions are not available.
  */
+// API URL: resolve a relative setting against the browser's address (correct also
+// behind proxies) and check that the API answers there (rewrite rule set up)
+window.rcmail && rcmail.addEventListener('init', function () {
+  var input = document.getElementById('identityapi-url');
+  if (!input || !window.fetch) {
+    return;
+  }
+  var url = new URL(input.getAttribute('data-api'), location.href).href;
+  input.value = url;
+  fetch(url + 'v1/me', { credentials: 'omit', redirect: 'manual', cache: 'no-store' }).then(function (res) {
+    return res.status === 401 && /problem\+json/.test(res.headers.get('Content-Type') || '');
+  }, function () { return false; }).then(function (ok) {
+    if (!ok) {
+      var check = document.getElementById('identityapi-urlcheck');
+      check.textContent = rcmail.get_label('apiunreachable', 'identity_api');
+      check.className = 'hint text-danger';
+    }
+  });
+});
+
 window.rcmail && rcmail.addEventListener('init', function () {
   var shop = document.getElementById('identityapi-shop');
   var result = document.getElementById('identityapi-result');

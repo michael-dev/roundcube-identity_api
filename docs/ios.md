@@ -41,7 +41,8 @@ In the **Shortcuts** app, tap **+** and add these actions:
    with the prompt "Shop".
    (Tap the ⓘ icon and enable **Show in Share Sheet** if it isn't on yet.)
 2. **Get Contents of URL**
-   * URL: `https://webmail.example.org/?_task=identity_api&_path=/v1/identities`
+   * URL: the API URL from the Roundcube settings followed by `v1/identities`, e.g.
+     `https://webmail.example.org/api/identity/v1/identities`
    * Method: **POST**
    * Headers: `Authorization` = `Bearer <your token>`
    * Request Body: **JSON**, one field: key `shop`, type *Text*, value = the variable *Shortcut Input*.
@@ -64,7 +65,7 @@ and it's on the clipboard; paste it into the e-mail field. Started from the home
 the Shortcut asks for the shop name instead.
 
 To reuse an existing address, open the Roundcube settings (see above) and tap **Show existing**. The
-API can list them too (`GET …&_path=/v1/identities&shop=gardenshop`), but a Shortcut that lets you pick one
+API can list them too (`GET …/v1/identities?shop=gardenshop`), but a Shortcut that lets you pick one
 takes more steps.
 
 ### Troubleshooting

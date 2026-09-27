@@ -60,8 +60,8 @@ check('token created', empty($args['abort']) && !empty($_SESSION['identity_api_n
 $token = $_SESSION['identity_api_new_token'] ?? '';
 $html  = render();
 check('new token shown once', strpos($html, $token) !== false && strpos(render(), $token) === false);
-check('connect button without url attribute', strpos($html, 'id="identityapi-connect"') !== false
-    && strpos($html, 'data-token="' . $token . '"') !== false && strpos($html, 'data-url') === false
+check('connect button with API path', strpos($html, 'id="identityapi-connect"') !== false
+    && strpos($html, 'data-token="' . $token . '"') !== false && strpos($html, 'data-api="api/identity/"') !== false
     && strpos($html, 'onclick=') !== false);
 check('label escaped', strpos($html, '<b>Laptop') === false);
 check('rotation policy shown', strpos($html, 'renewed automatically every 30 days') !== false);

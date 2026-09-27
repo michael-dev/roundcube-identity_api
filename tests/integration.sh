@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Integration test: runs Roundcube (SQLite, PHP built-in server) with the
-# identity_api plugin and exercises the HTTP API.
+# Integration test: runs Roundcube (SQLite or MySQL) with the identity_api
+# plugin and exercises the REST API over HTTP.
+#   WEB=php (default): PHP's built-in server with tests/router.php
+#   WEB=nginx, WEB=apache: the web server with PHP-FPM and the rewrite rule
+#   from the README (needs nginx or apache2 and php-fpm, see start_web below)
 set -euo pipefail
 
 RC_VERSION="${RC_VERSION:-1.6.19}"
@@ -61,10 +64,126 @@ TOKEN=$(php -r '
 # serve public_html like a production setup (required by Roundcube >= 1.7)
 DOCROOT="$RC"
 [ -f "$RC/public_html/index.php" ] && DOCROOT="$RC/public_html"
-php -d opcache.enable=0 -d opcache.enable_cli=0 -S "127.0.0.1:$PORT" -t "$DOCROOT" >"$WORK/server.log" 2>&1 &
-SERVER=$!
-trap 'kill $SERVER 2>/dev/null' EXIT
-sleep 1
+
+# rewrite rule for the web server, taken from the README (```nginx / ```apache block)
+readme_block() {
+  awk -v lang="$1" '$0 == "```" lang {on = 1; next} on && $0 == "```" {exit} on' "$ROOT/README.md"
+}
+
+start_web() {
+  local sock fpm
+  case "${WEB:-php}" in
+  php)
+    php -d opcache.enable=0 -d opcache.enable_cli=0 -S "127.0.0.1:$PORT" -t "$DOCROOT" "$ROOT/tests/router.php" >"$WORK/server.log" 2>&1 &
+    SERVER=$!
+    return
+    ;;
+  esac
+
+  # PHP-FPM, socket in a short path (length limit of unix sockets)
+  SOCKDIR=$(mktemp -d /tmp/rcid.XXXXXX)
+  chmod 755 "$SOCKDIR"
+  sock="$SOCKDIR/fpm.sock"
+  fpm="${FPM:-$(ls /usr/sbin/php-fpm* 2>/dev/null | head -1)}"
+  cat > "$WORK/fpm.conf" <<CONF
+[global]
+error_log = $WORK/fpm.log
+daemonize = no
+[www]
+listen = $sock
+listen.mode = 0666
+pm = static
+pm.max_children = 4
+clear_env = no
+catch_workers_output = yes
+php_admin_value[opcache.enable] = 0
+CONF
+  if [ "$(id -u)" = 0 ]; then "$fpm" -R -y "$WORK/fpm.conf" & else "$fpm" -y "$WORK/fpm.conf" & fi
+  FPM_PID=$!
+
+  case "$WEB" in
+  nginx)
+    mkdir -p "$WORK/nginx"
+    cat > "$WORK/nginx.conf" <<CONF
+$( [ "$(id -u)" = 0 ] && echo "user root;" )
+worker_processes 1;
+pid $WORK/nginx/nginx.pid;
+error_log $WORK/nginx/error.log;
+daemon off;
+events {}
+http {
+  include /etc/nginx/mime.types;
+  access_log $WORK/nginx/access.log;
+  client_body_temp_path $WORK/nginx/body;
+  fastcgi_temp_path $WORK/nginx/fastcgi;
+  proxy_temp_path $WORK/nginx/proxy;
+  uwsgi_temp_path $WORK/nginx/uwsgi;
+  scgi_temp_path $WORK/nginx/scgi;
+  server {
+    listen 127.0.0.1:$PORT;
+    root $DOCROOT;
+    index index.php;
+
+$(readme_block nginx)
+
+    location ~ \.php\$ {
+      include /etc/nginx/fastcgi_params;
+      fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+      fastcgi_pass unix:$sock;
+    }
+  }
+}
+CONF
+    nginx -e "$WORK/nginx/error.log" -c "$WORK/nginx.conf" &
+    SERVER=$!
+    ;;
+  apache)
+    mkdir -p "$WORK/apache"
+    local user=""
+    if [ "$(id -u)" = 0 ]; then user="User www-data
+Group www-data"; chmod -R o+rX "$WORK"; fi
+    cat > "$WORK/apache.conf" <<CONF
+ServerRoot /etc/apache2
+Listen 127.0.0.1:$PORT
+ServerName localhost
+PidFile $WORK/apache/httpd.pid
+DefaultRuntimeDir $WORK/apache
+ErrorLog $WORK/apache/error.log
+$user
+LoadModule mpm_event_module /usr/lib/apache2/modules/mod_mpm_event.so
+LoadModule authz_core_module /usr/lib/apache2/modules/mod_authz_core.so
+LoadModule dir_module /usr/lib/apache2/modules/mod_dir.so
+LoadModule mime_module /usr/lib/apache2/modules/mod_mime.so
+LoadModule rewrite_module /usr/lib/apache2/modules/mod_rewrite.so
+LoadModule proxy_module /usr/lib/apache2/modules/mod_proxy.so
+LoadModule proxy_fcgi_module /usr/lib/apache2/modules/mod_proxy_fcgi.so
+TypesConfig /etc/mime.types
+DocumentRoot $DOCROOT
+DirectoryIndex index.php
+<FilesMatch "\.php\$">
+  SetHandler "proxy:unix:$sock|fcgi://localhost"
+</FilesMatch>
+<Directory />
+  AllowOverride None
+</Directory>
+<Directory $DOCROOT>
+  AllowOverride None
+  Require all granted
+$(readme_block apache)
+</Directory>
+CONF
+    apache2 -f "$WORK/apache.conf" -DFOREGROUND &
+    SERVER=$!
+    ;;
+  *)
+    echo "unknown WEB=$WEB"; exit 2
+    ;;
+  esac
+}
+
+start_web
+trap 'kill $SERVER ${FPM_PID:-} 2>/dev/null; rm -rf "${SOCKDIR:-/nonexistent}"' EXIT
+sleep 2
 
 FAIL=0
 check() { # name expected-status expected-regex curl-args...
@@ -78,7 +197,7 @@ check() { # name expected-status expected-regex curl-args...
     echo "FAIL $name: HTTP $code $out"; FAIL=1
   fi
 }
-V1="http://127.0.0.1:$PORT/?_task=identity_api&_path="
+V1="http://127.0.0.1:$PORT/api/identity"
 B=(-H "Authorization: Bearer $TOKEN")
 J=(-H 'Content-Type: application/json')
 Y=$(date +%Y)
@@ -96,8 +215,8 @@ check "create 2nd domain" 201 "\"email\":\"u-bookshop-$Y-[a-z0-9]{8}@shop.exampl
 check "create form data"  201 "\"email\":\"u-bookshop-$Y-[a-z0-9]{8}@example.org\"" "${B[@]}" -d 'shop=Bookshop' "${V1}/v1/identities"
 check "foreign domain"    403 '"code":"domain_not_allowed"' "${B[@]}" "${J[@]}" -d '{"shop":"bookshop","domain":"evil.com"}' "${V1}/v1/identities"
 check "empty shop"        400 '"code":"shop_missing"' "${B[@]}" "${J[@]}" -d '{"shop":"!!"}' "${V1}/v1/identities"
-check "list"              200 '^\{"items":\[\{[^]]*"shop":"bookshop"[^]]*\},\{[^]]*"shop":"bookshop"[^]]*\}\]\}$' "${B[@]}" "${V1}/v1/identities&shop=Bookshop"
-check "list other shop"   200 '^\{"items":\[\]\}$' "${B[@]}" "${V1}/v1/identities&shop=gardenshop"
+check "list"              200 '^\{"items":\[\{[^]]*"shop":"bookshop"[^]]*\},\{[^]]*"shop":"bookshop"[^]]*\}\]\}$' "${B[@]}" "${V1}/v1/identities?shop=Bookshop"
+check "list other shop"   200 '^\{"items":\[\]\}$' "${B[@]}" "${V1}/v1/identities?shop=gardenshop"
 check "no _path"          404 '"code":"not_found"' "${B[@]}" "http://127.0.0.1:$PORT/?_task=identity_api"
 check "old _action API gone" 404 '"code":"not_found"' "${B[@]}" "http://127.0.0.1:$PORT/?_task=identity_api&_action=info"
 check "login page intact" 200 'rcmloginuser' "http://127.0.0.1:$PORT/?_task=login"
@@ -113,7 +232,7 @@ php -r '
 ' "$RC"
 check "user domains"      200 '"domains":\["kunden.example.com","example.org"\],"default_domain":"kunden.example.com"' "${B[@]}" "${V1}/v1/me"
 check "user prefix"       200 '"prefix":"fam"' "${B[@]}" "${V1}/v1/me"
-check "old prefix listed" 200 "\"email\":\"u-bookshop-$Y-" "${B[@]}" "${V1}/v1/identities&shop=bookshop"
+check "old prefix listed" 200 "\"email\":\"u-bookshop-$Y-" "${B[@]}" "${V1}/v1/identities?shop=bookshop"
 check "user default"      201 "\"email\":\"fam-gardenshop-$Y-[a-z0-9]{8}@kunden.example.com\"" "${B[@]}" -d 'shop=gardenshop' "${V1}/v1/identities"
 check "admin default off" 403 '"code":"domain_not_allowed"' "${B[@]}" -d 'shop=gardenshop' -d 'domain=shop.example.net' "${V1}/v1/identities"
 
@@ -138,11 +257,11 @@ header_check "v1 401 WWW-Authenticate" '^WWW-Authenticate: Bearer' "${V1}/v1/me"
 header_check "v1 problem+json"  '^Content-Type: application/problem\+json' "${V1}/v1/me"
 header_check "v1 token headers" '^Identity-Api-Token-Rotate: false' "${B[@]}" "${V1}/v1/me"
 check "v1 create"             201 '"email":"fam-v1-test-[0-9]{4}-[a-z0-9]{8}@kunden.example.com".*"shop":"v1-test"' "${B[@]}" -H 'Content-Type: application/json' -d '{"shop":"V1 Test"}' "${V1}/v1/identities"
-header_check "v1 create Location" '^Location: \./\?_task=identity_api&_path=/v1/identities/[0-9]+' "${B[@]}" -d 'shop=v1 test' "${V1}/v1/identities"
-check "v1 list by shop"       200 '^\{"items":\[\{"id":[0-9]+,"email":"fam-v1-test-' "${B[@]}" "${V1}/v1/identities&shop=v1%20test"
-check "v1 list, query in path" 200 '"shop":"v1-test"' "${B[@]}" "${V1}/v1/identities?shop=v1-test"
+header_check "v1 create Location" '^Location: identities/[0-9]+' "${B[@]}" -d 'shop=v1 test' "${V1}/v1/identities"
+check "v1 list by shop"       200 '^\{"items":\[\{"id":[0-9]+,"email":"fam-v1-test-' "${B[@]}" "${V1}/v1/identities?shop=v1%20test"
+check "v1 list, other query" 200 '"shop":"v1-test"' "${B[@]}" "${V1}/v1/identities?shop=v1-test"
 check "v1 list all"           200 '"shop":"bookshop".*"shop":"gaertnerei-gruen"' "${B[@]}" "${V1}/v1/identities"
-V1ID=$(curl -s "${B[@]}" "${V1}/v1/identities&shop=v1-test" | php -r 'echo json_decode(stream_get_contents(STDIN), true)["items"][0]["id"];')
+V1ID=$(curl -s "${B[@]}" "${V1}/v1/identities?shop=v1-test" | php -r 'echo json_decode(stream_get_contents(STDIN), true)["items"][0]["id"];')
 check "v1 get"                200 "\"id\":$V1ID," "${B[@]}" "${V1}/v1/identities/$V1ID"
 check "v1 delete"             204 '^$' -X DELETE "${B[@]}" "${V1}/v1/identities/$V1ID"
 check "v1 deleted is gone"    404 '"code":"not_found"' "${B[@]}" "${V1}/v1/identities/$V1ID"
@@ -156,7 +275,7 @@ check "v1 token"              200 '"id":"0123abcd".*"rotate":false' "${B[@]}" "$
 # user pattern: new addresses use it, listing still finds old ones
 set_prefs '$prefs["identity_api_user_template"] = "web.{shop}.{random}";'
 check "user pattern create"  201 '"email":"web\.gardenshop\.[a-z0-9]{8}@kunden\.example\.com"' "${B[@]}" -d 'shop=gardenshop' "${V1}/v1/identities"
-check "list both patterns"   200 '"email":"web\.gardenshop\..*"email":"fam-gardenshop-' "${B[@]}" "${V1}/v1/identities&shop=gardenshop"
+check "list both patterns"   200 '"email":"web\.gardenshop\..*"email":"fam-gardenshop-' "${B[@]}" "${V1}/v1/identities?shop=gardenshop"
 set_prefs 'unset($prefs["identity_api_user_template"]);'
 
 # identities_level 1: core only allows the login address
@@ -251,7 +370,7 @@ CLIENT_TOKEN=$(php -r '
   echo "1.c11e0001.$secret";
 ' "$RC")
 if command -v node >/dev/null; then
-  node "$ROOT/tests/rotation-client.js" "http://127.0.0.1:$PORT/" "$CLIENT_TOKEN" || FAIL=1
+  node "$ROOT/tests/rotation-client.js" "$V1/" "$CLIENT_TOKEN" || FAIL=1
 else
   echo "skip client rotation test (node not installed)"
 fi
@@ -273,7 +392,7 @@ if [ "${E2E:-0}" = 1 ]; then
   IMAP=$!
   php -S "127.0.0.1:$SHOP_PORT" -t "$ROOT/tests/e2e" >"$WORK/shop.log" 2>&1 &
   SHOP=$!
-  trap 'kill $SERVER $IMAP $SHOP 2>/dev/null' EXIT
+  trap 'kill $SERVER ${FPM_PID:-} $IMAP $SHOP 2>/dev/null; rm -rf "${SOCKDIR:-/nonexistent}"' EXIT
   # imap_host: Roundcube >= 1.6, default_host/default_port: 1.5
   set_config "\$config['imap_host'] = 'localhost:$IMAP_PORT';" "\$config['default_host'] = 'localhost';" "\$config['default_port'] = $IMAP_PORT;"
   node "$ROOT/scripts/build-chrome.js" "$WORK/chrome" >/dev/null
