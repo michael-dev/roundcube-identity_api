@@ -1,0 +1,79 @@
+<?php
+
+// Identity API plugin configuration
+// Copy to config.inc.php and adjust.
+
+// Users configure their domains in Settings > Preferences > Shop address API.
+// The first entry is the default, further entries can be selected in the
+// browser extension.
+
+// Default domains if the user has not configured any.
+// The Host based placeholders %n, %t and %d are supported (e.g. '%d':
+// webmail.example.org -> example.org) but only with Roundcube's
+// $config['trusted_host_patterns'] set, as the Host header is client input.
+// Empty: the domain of the user's default identity is used.
+$config['identity_api_domains'] = [];
+
+// Restrict the domains users may configure. Entries are domains or
+// wildcards for subdomains ('*.example.org'); %n/%t/%d as above.
+// Empty: any domain (like Roundcube's identities_level 0).
+// To lock the user setting completely add 'identity_api_user_domains'
+// to Roundcube's $config['dont_override'].
+$config['identity_api_allowed_domains'] = [];
+
+// Local part template. Placeholders: {prefix}, {shop}, {year}, {random}
+$config['identity_api_template'] = '{prefix}-{shop}-{year}-{random}';
+
+// Default for {prefix}. Users can set their own prefix in the settings
+// (lock it by adding 'identity_api_prefix' to $config['dont_override']).
+// Empty: first letter of the username ("michael@example.org" -> "m").
+$config['identity_api_default_prefix'] = '';
+
+// Length and characters of {random}
+$config['identity_api_random_length'] = 8;
+$config['identity_api_random_chars'] = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+// Maximum length of the {shop} part
+$config['identity_api_shop_maxlength'] = 30;
+
+// Maximum number of identities per user (0 = unlimited)
+$config['identity_api_max_identities'] = 1000;
+
+// Maximum number of identities a user can create through the API per hour
+// (0 = unlimited)
+$config['identity_api_rate_limit'] = 30;
+
+// Reject tokens of users who have not logged in to the webmail for this many
+// days (0 = off). Tokens don't depend on the IMAP login otherwise: to lock out
+// a user, delete their tokens (or their Roundcube user).
+$config['identity_api_max_login_age'] = 0;
+
+// Token rotation: clients (like the browser extension) are told to fetch a
+// new token every N days; the old one stays valid until the new one is used.
+// 0 = no rotation.
+$config['identity_api_token_rotation'] = 30;
+
+// A token that was not rotated for this many days expires (e.g. a device that
+// is no longer used). Must be larger than the rotation interval, smaller values
+// are raised to twice the interval. 0 = tokens never expire.
+$config['identity_api_token_lifetime'] = 90;
+
+// Allow users to create tokens without rotation and expiry, for clients that
+// can't rotate (scripts, iOS Shortcuts). Such a token stays valid until it is
+// revoked. If disabled later, existing ones are treated like normal tokens.
+$config['identity_api_static_tokens'] = false;
+
+// Maximum number of API tokens per user
+$config['identity_api_max_tokens'] = 10;
+
+// Mail is delivered per identity, so an address must belong to one user only:
+// refuse identities (also in the Roundcube settings) with an address another
+// user has or had (deleted identities included). Set to false for setups
+// with deliberately shared addresses. See docs/postfix.md for a database
+// constraint as well.
+$config['identity_api_unique_identities'] = true;
+
+// By default no identities are created if identities_level >= 1 (users may
+// not choose addresses or have a single identity). Set to true to create
+// them anyway.
+$config['identity_api_ignore_identities_level'] = false;

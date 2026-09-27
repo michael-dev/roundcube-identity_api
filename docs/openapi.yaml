@@ -1,0 +1,316 @@
+openapi: 3.1.0
+info:
+  title: identity_api – per-shop e-mail identities for Roundcube
+  version: '2.0'
+  summary: Create and manage generated e-mail identities (<prefix>-<shop>-<year>-<random>@domain) of a Roundcube user.
+  description: |
+    REST API of the Roundcube plugin `identity_api`.
+
+    **Base URL.** Roundcube has no URL routing, so resources are addressed with the `_path` query
+    parameter: `https://webmail.example.org/?_task=identity_api&_path=/v1/identities`.
+    Query parameters can follow with `&` (or `?`, which is also accepted inside `_path`).
+    With a rewrite rule (see the README), the same resources are available as
+    `https://webmail.example.org/api/identity/v1/identities`.
+
+    **Authentication.** Every request needs a personal access token, created by the user in
+    Roundcube under *Settings → Preferences → Shop address API*:
+    `Authorization: Bearer <token>` (or `X-Identity-Api-Token: <token>`).
+
+    **Token rotation.** If the server has rotation enabled, every authenticated response carries
+    the headers `Identity-Api-Token-Rotate` and `Identity-Api-Token-Expires`. Once
+    `Identity-Api-Token-Rotate: true`, the client should call `POST /v1/token/rotate` and use the
+    returned token from then on. The old token stays valid until the new one is used for the first
+    time. A token that is not rotated before `Identity-Api-Token-Expires` stops working. Tokens
+    created as "without rotation" (if the admin allows them) never expire.
+
+    **Errors** use [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details with an
+    additional machine readable `code`.
+  license:
+    name: GPL-3.0-or-later
+    identifier: GPL-3.0-or-later
+  contact:
+    url: https://github.com/michael-dev/ff-rc-identity
+servers:
+  - url: 'https://{host}/?_task=identity_api&_path='
+    description: Query form, works without server configuration
+    variables:
+      host:
+        default: webmail.example.org
+  - url: 'https://{host}/api/identity'
+    description: Pretty URLs, needs a rewrite rule
+    variables:
+      host:
+        default: webmail.example.org
+security:
+  - bearer: []
+  - tokenHeader: []
+tags:
+  - name: identities
+    description: Generated e-mail identities of the user
+  - name: account
+    description: Settings of the user relevant for new addresses
+  - name: token
+    description: Status and rotation of the access token
+paths:
+  /v1/me:
+    get:
+      tags: [account]
+      operationId: getMe
+      summary: Account settings relevant for new addresses
+      responses:
+        '200':
+          description: Settings of the token's user
+          headers:
+            Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
+            Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /v1/identities:
+    get:
+      tags: [identities]
+      operationId: listIdentities
+      summary: List generated identities
+      description: Identities of the user that match the user's or the admin's pattern, newest first.
+      parameters:
+        - name: shop
+          in: query
+          description: Only addresses for this shop (normalized like on creation, e.g. "Grün" → "gruen")
+          schema: { type: string }
+      responses:
+        '200':
+          description: Identities
+          headers:
+            Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
+            Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Identity' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [identities]
+      operationId: createIdentity
+      summary: Create a new address for a shop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewIdentity' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/NewIdentity' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: URL of the new identity (relative)
+              schema: { type: string }
+            Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
+            Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Identity' }
+        '400':
+          description: '`shop_missing`, `address_too_long`'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`domain_not_allowed`, `identity_limit_reached`, `identities_disabled`'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: '`rate_limit_exceeded`'
+          headers:
+            Retry-After:
+              description: Seconds until a new identity can be created
+              schema: { type: integer }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/identities/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [identities]
+      operationId: getIdentity
+      summary: One generated identity
+      responses:
+        '200':
+          description: Identity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Identity' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [identities]
+      operationId: deleteIdentity
+      summary: Delete a generated identity
+      description: |
+        Roundcube marks the identity as deleted. If the mail server only delivers to
+        identities that aren't deleted, the address stops receiving mail.
+        Only identities created by this plugin (matching a pattern) can be deleted.
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: '`delete_failed` (e.g. it is the user''s last identity)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/token:
+    get:
+      tags: [token]
+      operationId: getToken
+      summary: Status of the token used for this request
+      responses:
+        '200':
+          description: Token status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Token' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /v1/token/rotate:
+    post:
+      tags: [token]
+      operationId: rotateToken
+      summary: Get a new token
+      description: |
+        Returns a new secret for the token used in this request. The current token stays valid
+        until the new one is used for the first time; afterwards only the new one works.
+        Of several unused new tokens, the first one used wins.
+      responses:
+        '200':
+          description: New token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: { type: string, description: 'New token, format <user_id>.<token_id>.<secret>' }
+                  expires: { type: [string, 'null'], format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: '`static_token` (tokens without rotation can''t be rotated)'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: Personal access token
+    tokenHeader:
+      type: apiKey
+      in: header
+      name: X-Identity-Api-Token
+      description: Alternative for servers that drop the Authorization header
+  headers:
+    TokenRotate:
+      description: '`true` if the client should rotate its token (`POST /v1/token/rotate`)'
+      schema: { type: string, enum: ['true', 'false'] }
+    TokenExpires:
+      description: Time the token expires unless it is rotated (absent if it doesn't expire)
+      schema: { type: string, format: date-time }
+  responses:
+    Unauthorized:
+      description: Missing, invalid, revoked or expired token (`unauthorized`)
+      headers:
+        WWW-Authenticate:
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Identity:
+      type: object
+      required: [id, email, name]
+      properties:
+        id: { type: integer }
+        email: { type: string, format: idn-email, example: m-bookshop-2026-k3x9q2ab@example.org }
+        name: { type: string, description: Display name of the identity }
+        shop: { type: [string, 'null'], example: bookshop }
+        prefix: { type: [string, 'null'], example: m }
+        year: { type: [integer, 'null'], example: 2026 }
+        changed: { type: [string, 'null'], format: date-time }
+    NewIdentity:
+      type: object
+      required: [shop]
+      properties:
+        shop:
+          type: string
+          description: |
+            Shop name, normalized by the server ("Gärtnerei Grün" → "gaertnerei-gruen").
+            A website address (starting with http:// or https://) is accepted too, the shop name is
+            then derived from its host ("https://checkout.gardenshop.example/kasse" → "gardenshop").
+          example: 'Gärtnerei Grün'
+        url:
+          type: string
+          description: Website address to derive the shop name from, used if `shop` is empty
+          example: 'https://www.gardenshop.example/'
+        domain: { type: string, description: 'One of `domains` from /v1/me (default: `default_domain`)' }
+        name: { type: string, description: 'Display name (default: name of the default identity)', maxLength: 128 }
+    Me:
+      type: object
+      required: [user, domains, default_domain, pattern]
+      properties:
+        user: { type: string, description: Roundcube username }
+        name: { type: string }
+        prefix: { type: string, example: m }
+        pattern: { type: string, example: '{prefix}-{shop}-{year}-{random}' }
+        domains: { type: array, items: { type: string } }
+        default_domain: { type: string }
+        limits:
+          type: object
+          properties:
+            max_identities: { type: [integer, 'null'] }
+            identities_per_hour: { type: [integer, 'null'] }
+    Token:
+      type: object
+      required: [id, rotate]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        created: { type: [string, 'null'], format: date-time }
+        issued: { type: [string, 'null'], format: date-time, description: Last rotation }
+        last_used: { type: [string, 'null'], format: date-time }
+        expires: { type: [string, 'null'], format: date-time }
+        rotate: { type: boolean }
+        static: { type: boolean, description: Token without rotation and expiry }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          description: Machine readable error code
+          enum: [unauthorized, not_found, method_not_allowed, shop_missing, invalid_shop, address_too_long,
+            domain_not_allowed, identity_limit_reached, identities_disabled, rate_limit_exceeded,
+            delete_failed, static_token, no_domain_configured, could_not_generate_a_unique_address,
+            saving_failed, internal_error]
