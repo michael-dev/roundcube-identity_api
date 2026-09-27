@@ -111,7 +111,9 @@ class identity_api_generator
     /** Public suffixes with two labels that are common for shops (same list as the extension). */
     public const MULTI_PART_SUFFIXES = ['co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'co.at', 'or.at',
         'com.au', 'net.au', 'org.au', 'co.nz', 'co.jp', 'co.kr', 'co.za', 'co.in', 'co.il',
-        'com.br', 'com.cn', 'com.hk', 'com.mx', 'com.pl', 'com.tr', 'com.tw', 'com.ar', 'com.sg'];
+        'com.br', 'com.cn', 'com.hk', 'com.mx', 'com.pl', 'com.tr', 'com.tw', 'com.ar', 'com.sg',
+        // hosting platforms: every shop has its own subdomain
+        'myshopify.com', 'wixsite.com', 'square.site', 'company.site', 'jimdosite.com', 'webflow.io', 'github.io', 'netlify.app', 'vercel.app', 'pages.dev', 'blogspot.com', 'wordpress.com'];
 
     /**
      * Shop name from a website address: "https://checkout.gardenshop.example/kasse" -> "gardenshop",

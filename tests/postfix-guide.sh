@@ -18,6 +18,11 @@ else
   PF_HOST="inet:${MYSQL_HOST:-127.0.0.1}:${MYSQL_PORT:-3306}"
 fi
 M() { mariadb "${CONN[@]}" "$@"; }
+# remove test database and user also when a check fails
+cleanup() {
+  M -e "DROP DATABASE IF EXISTS $DBNAME; DROP USER IF EXISTS 'postfix_test'@'%'; DROP USER IF EXISTS 'postfix_test'@'localhost';" || true
+}
+trap cleanup EXIT
 
 # Roundcube's MySQL schema
 SCHEMA="$WORK/mysql.initial.sql"
@@ -96,5 +101,4 @@ q allowed "INSERT INTO identities (user_id, changed, name, email) VALUES (1, NOW
 q allowed "UPDATE identities SET name = 'Anna B' WHERE user_id = 2 AND email = 'x-dup-2026-cccccccc@example.org'" "rename"
 q allowed "INSERT INTO identities (user_id, changed, name, email) VALUES (2, NOW(), 'x', 'a-new-2026-eeeeeeee@example.org')" "new unique address"
 
-M -e "DROP DATABASE $DBNAME"
 exit $FAIL

@@ -114,7 +114,7 @@ try {
     check('revoke', empty((new rcube_user(1))->get_prefs()['identity_api_tokens'][$id]));
 }
 catch (Throwable $e) {
-    check('revoke with nested input', false, get_class($e) . ': ' . $e->getMessage());
+    check('revoke', false, 'nested input: ' . get_class($e) . ': ' . $e->getMessage());
 }
 
 exit($failed ? 1 : 0);

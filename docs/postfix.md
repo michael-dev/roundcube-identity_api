@@ -58,9 +58,12 @@ query = SELECT MIN(u.username) FROM identities i JOIN users u ON u.user_id = i.u
   mailbox. If users log in with a plain name (`michael`), use
   `SELECT CONCAT(MIN(u.username), '@example.org') …` instead.
 * The `REGEXP` matches the default pattern `{prefix}-{shop}-{year}-{random}`. If you changed
-  `identity_api_template` or allow users to set their own pattern, adjust it. Better still,
-  **use a domain only for shop addresses** (e.g. `shop.example.org`, configured in
-  `identity_api_allowed_domains`). Then replace the `REGEXP` line with
+  `identity_api_template`, `identity_api_random_length` or `identity_api_random_chars`, or allow
+  users to set their own pattern, adjust it. A hand-entered address in that format would match too.
+  Better still, **use a domain only for shop addresses** (e.g. `shop.example.org`: set it as
+  `$config['identity_api_domains'] = ['shop.example.org'];` and restrict users to it with
+  `$config['identity_api_allowed_domains'] = ['shop.example.org'];`, or lock the list with
+  `dont_override`). Then replace the `REGEXP` line with
   `AND i.email LIKE '%%@shop.example.org'` (`%%` is a literal `%` in Postfix queries), and any
   pattern works.
 * With the default collation (`utf8mb4_unicode_ci`), comparisons are case-insensitive.
@@ -164,5 +167,5 @@ FROM identities GROUP BY email HAVING COUNT(DISTINCT user_id) > 1;
 
 ## PostgreSQL
 
-The same approach works with `pgsql:` tables (not tested). In the queries, replace `REGEXP` with `~*` and
-`MIN(u.username)` stays. Write the triggers as a PL/pgSQL function that raises an exception.
+The same approach works with `pgsql:` tables (not tested). In the queries, replace `REGEXP` with `~*`;
+the rest stays the same. Write the triggers as a PL/pgSQL function that raises an exception.

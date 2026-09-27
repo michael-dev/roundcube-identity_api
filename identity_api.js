@@ -3,20 +3,28 @@
  * Works in any browser, e.g. Firefox on iOS where extensions are not available.
  */
 // API URL: resolve a relative setting against the browser's address (correct also
-// behind proxies) and check that the API answers there (rewrite rule set up)
+// behind proxies) and check that the API answers there (rewrite rule set up) and
+// gets the Authorization header: a made-up token must be "invalid", not missing.
 window.rcmail && rcmail.addEventListener('init', function () {
   var input = document.getElementById('identityapi-url');
-  if (!input || !window.fetch) {
+  var check = document.getElementById('identityapi-urlcheck');
+  if (!input || !check || !window.fetch) {
     return;
   }
   var url = new URL(input.getAttribute('data-api'), location.href).href;
   input.value = url;
-  fetch(url + 'v1/me', { credentials: 'omit', redirect: 'manual', cache: 'no-store' }).then(function (res) {
-    return res.status === 401 && /problem\+json/.test(res.headers.get('Content-Type') || '');
-  }, function () { return false; }).then(function (ok) {
-    if (!ok) {
-      var check = document.getElementById('identityapi-urlcheck');
-      check.textContent = rcmail.get_label('apiunreachable', 'identity_api');
+  fetch(url + 'v1/me', {
+    credentials: 'omit', redirect: 'manual', cache: 'no-store',
+    headers: { Authorization: 'Bearer 0.00000000.check' }
+  }).then(function (res) {
+    if (res.status !== 401 || !/problem\+json/.test(res.headers.get('Content-Type') || '')) {
+      return 'apiunreachable';
+    }
+    return res.json().then(function (p) { return p.detail === 'no token' ? 'apiauthdropped' : 'ok'; });
+  }).catch(function () { return 'apiunreachable'; }).then(function (state) {
+    check.setAttribute('data-state', state);
+    if (state !== 'ok') {
+      check.textContent = rcmail.get_label(state, 'identity_api');
       check.className = 'hint text-danger';
     }
   });

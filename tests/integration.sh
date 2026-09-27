@@ -34,6 +34,8 @@ PHP
 if [ "${DB:-sqlite}" = mysql ]; then
   MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}" MYSQL_PORT="${MYSQL_PORT:-3306}"
   MYSQL_USER="${MYSQL_USER:-roundcube}" MYSQL_PASSWORD="${MYSQL_PASSWORD:-roundcube}" MYSQL_DATABASE="${MYSQL_DATABASE:-roundcube_test}"
+  # all tables of the database are dropped below
+  case "$MYSQL_DATABASE" in *test*) ;; *) echo "MYSQL_DATABASE must contain 'test', its tables are dropped"; exit 2 ;; esac
   export PDO_DSN="mysql:host=$MYSQL_HOST;port=$MYSQL_PORT;dbname=$MYSQL_DATABASE;charset=utf8mb4" PDO_USER="$MYSQL_USER" PDO_PASS="$MYSQL_PASSWORD"
   export RC_DSN="mysql://$MYSQL_USER:$MYSQL_PASSWORD@$MYSQL_HOST:$MYSQL_PORT/$MYSQL_DATABASE"
   export SCHEMA=mysql
@@ -74,7 +76,7 @@ start_web() {
   local sock fpm
   case "${WEB:-php}" in
   php)
-    php -d opcache.enable=0 -d opcache.enable_cli=0 -S "127.0.0.1:$PORT" -t "$DOCROOT" "$ROOT/tests/router.php" >"$WORK/server.log" 2>&1 &
+    PHP_CLI_SERVER_WORKERS=4 php -d opcache.enable=0 -d opcache.enable_cli=0 -S "127.0.0.1:$PORT" -t "$DOCROOT" "$ROOT/tests/router.php" >"$WORK/server.log" 2>&1 &
     SERVER=$!
     return
     ;;
@@ -167,11 +169,17 @@ DirectoryIndex index.php
   AllowOverride None
 </Directory>
 <Directory $DOCROOT>
-  AllowOverride None
+  AllowOverride All
   Require all granted
-$(readme_block apache)
 </Directory>
 CONF
+    # README: the lines go into Roundcube's .htaccess directly after "RewriteEngine On"
+    [ -f "$DOCROOT/.htaccess.orig" ] || cp "$DOCROOT/.htaccess" "$DOCROOT/.htaccess.orig"
+    readme_block apache > "$WORK/apache-rule.txt"
+    awk -v rule="$WORK/apache-rule.txt" '{print} !done && /^RewriteEngine On/ {while ((getline l < rule) > 0) print l; done = 1}' \
+      "$DOCROOT/.htaccess.orig" > "$DOCROOT/.htaccess"
+    grep -q '^RewriteRule ^api/identity' "$DOCROOT/.htaccess" || { echo "rule not inserted into .htaccess"; exit 2; }
+    chmod o+r "$DOCROOT/.htaccess"
     apache2 -f "$WORK/apache.conf" -DFOREGROUND &
     SERVER=$!
     ;;
@@ -181,15 +189,40 @@ CONF
   esac
 }
 
+show_logs() {
+  for f in "$WORK"/server.log "$WORK"/fpm.log "$WORK"/nginx/error.log "$WORK"/apache/error.log "$RC"/logs/errors*; do
+    [ -s "$f" ] && { echo "--- $f"; tail -n 30 "$f"; }
+  done
+  return 0
+}
+cleanup() {
+  local status=$?
+  kill ${SERVER:-} ${FPM_PID:-} ${IMAP:-} ${SHOP:-} 2>/dev/null || true
+  rm -rf "${SOCKDIR:-/nonexistent}"
+  [ "$status" = 0 ] || show_logs
+}
+trap cleanup EXIT
+
+# waits until the server answers without a server error (e.g. nginx 502 while PHP-FPM starts)
+wait_http() { # port [path]
+  local code
+  for _ in $(seq 100); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1${2:-/}" || true)
+    [ "$code" != 000 ] && [ "$code" -lt 500 ] && return 0
+    sleep 0.1
+  done
+  echo "nothing answers on port $1"; return 1
+}
+
 start_web
-trap 'kill $SERVER ${FPM_PID:-} 2>/dev/null; rm -rf "${SOCKDIR:-/nonexistent}"' EXIT
-sleep 2
+wait_http "$PORT" /api/identity/v1/me  # the API creates no session
+kill -0 "$SERVER" || { echo "web server not running (port $PORT in use?)"; exit 2; }
 
 FAIL=0
 check() { # name expected-status expected-regex curl-args...
   local name="$1" status="$2" regex="$3"; shift 3
   local out code
-  out=$(curl -s -w '\n%{http_code}' "$@")
+  out=$(curl -s -w '\n%{http_code}' "$@" || true)
   code=$(tail -n1 <<<"$out"); out=$(sed '$d' <<<"$out")
   if [ "$code" = "$status" ] && grep -Eq "$regex" <<<"$out"; then
     echo "ok   $name"
@@ -203,11 +236,13 @@ J=(-H 'Content-Type: application/json')
 Y=$(date +%Y)
 header_check() { # name header-regex curl-args...
   local name="$1" regex="$2"; shift 2
-  if curl -s -D - -o /dev/null "$@" | tr -d '\r' | grep -Eiq "$regex"; then echo "ok   $name"; else echo "FAIL $name"; FAIL=1; fi
+  local headers
+  headers=$(curl -s -D - -o /dev/null "$@" | tr -d '\r' || true)
+  if grep -Eiq "$regex" <<<"$headers"; then echo "ok   $name"; else echo "FAIL $name"; FAIL=1; fi
 }
 
-check "no token"          401 '"code":"unauthorized"' "${V1}/v1/me"
-check "wrong token"       401 '"code":"unauthorized"' -H "Authorization: Bearer ${TOKEN%?}x" "${V1}/v1/me"
+check "no token"          401 '"detail":"no token","code":"unauthorized"' "${V1}/v1/me"
+check "wrong token"       401 '"detail":"invalid token","code":"unauthorized"' -H "Authorization: Bearer ${TOKEN%?}x" "${V1}/v1/me"
 check "me"                200 '"prefix":"u".*"domains":\["example.org","shop.example.net"\]' "${B[@]}" "${V1}/v1/me"
 check "token header auth" 200 '"user":"user@example.org"' -H "X-Identity-Api-Token: $TOKEN" "${V1}/v1/me"
 check "create"            201 "\"email\":\"u-gaertnerei-gruen-$Y-[a-z0-9]{8}@example.org\"" "${B[@]}" "${J[@]}" -d '{"shop":"Gärtnerei Grün"}' "${V1}/v1/identities"
@@ -300,6 +335,35 @@ set_config
 # website address as shop name (iOS share sheet)
 check "v1 create from URL"    201 '"shop":"gardenshop"' "${B[@]}" -H 'Content-Type: application/json' -d '{"shop":"https://checkout.gardenshop.example/kasse?x=1"}' "${V1}/v1/identities"
 
+# addresses entered by hand are never listed or deleted, even if they match the pattern
+HAND_ID=$(php -r '
+  $p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null);
+  $p->exec("INSERT INTO identities (user_id, changed, del, standard, name, email) VALUES (1, \"" . date("Y-m-d H:i:s") . "\", 0, 0, \"Hand\", \"fam-bookshop-2026-handmade@example.org\")");
+  echo $p->lastInsertId();
+' "$RC")
+check "hand-entered address not listed"    200 '^\{"items":\[' "${B[@]}" "${V1}/v1/identities?shop=bookshop"
+if curl -s "${B[@]}" "${V1}/v1/identities?shop=bookshop" | grep -q handmade; then echo "FAIL hand-entered address listed"; FAIL=1; else echo "ok   hand-entered address absent"; fi
+check "hand-entered address not deletable" 404 '"code":"not_found"' -X DELETE "${B[@]}" "${V1}/v1/identities/$HAND_ID"
+
+# parallel requests can't get past the rate limit
+# (not with SQLite on Roundcube 1.5: it sets no busy timeout, parallel writes fail with "database is locked")
+if [[ "$RC_VERSION" == 1.5.* && "${DB:-sqlite}" == sqlite ]]; then
+  echo "skip parallel rate limit test (SQLite on Roundcube 1.5)"
+else
+set_config "\$config['identity_api_rate_limit'] = 3;"
+set_prefs '$prefs["identity_api_recent"] = [];'
+PIDS=()
+for i in 1 2 3 4 5 6; do
+  curl -s -o /dev/null -w '%{http_code}\n' "${B[@]}" -d "shop=parallel$i" "${V1}/v1/identities" >"$WORK/parallel-$i.txt" &
+  PIDS+=($!)
+done
+wait "${PIDS[@]}"
+CREATED=$(cat "$WORK"/parallel-*.txt | grep -c '^201$' || true)
+if [ "$CREATED" = 3 ]; then echo "ok   rate limit holds for parallel requests"; else echo "FAIL rate limit, parallel: $CREATED of 6 created (limit 3)"; FAIL=1; fi
+set_config
+set_prefs '$prefs["identity_api_recent"] = [];'
+fi
+
 # tokens without rotation (admin option): no rotation, no expiry, rotate refused
 static_token() { # creates token 5a5a5a5a, issued 400 days ago, marked static
   php -r '
@@ -377,7 +441,7 @@ fi
 
 # settings section (preferences hooks)
 php "$ROOT/plugin/tests/settings_test.php" "$RC" >"$WORK/settings.out" 2>&1 || FAIL=1
-grep -v 'Deprecated' "$WORK/settings.out"
+grep -v 'Deprecated' "$WORK/settings.out" || true
 
 SESSIONS=$(php -r '$p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null); echo $p->query("SELECT count(*) FROM session")->fetchColumn();' "$RC")
 # only the login page request may have created a session
@@ -392,14 +456,15 @@ if [ "${E2E:-0}" = 1 ]; then
   IMAP=$!
   php -S "127.0.0.1:$SHOP_PORT" -t "$ROOT/tests/e2e" >"$WORK/shop.log" 2>&1 &
   SHOP=$!
-  trap 'kill $SERVER ${FPM_PID:-} $IMAP $SHOP 2>/dev/null; rm -rf "${SOCKDIR:-/nonexistent}"' EXIT
   # imap_host: Roundcube >= 1.6, default_host/default_port: 1.5
   set_config "\$config['imap_host'] = 'localhost:$IMAP_PORT';" "\$config['default_host'] = 'localhost';" "\$config['default_port'] = $IMAP_PORT;"
   node "$ROOT/scripts/build-chrome.js" "$WORK/chrome" >/dev/null
   rm -rf "$WORK/chromium-profile"
-  sleep 1
+  wait_http "$SHOP_PORT"
+  for _ in $(seq 50); do (exec 3<>"/dev/tcp/127.0.0.1/$IMAP_PORT") 2>/dev/null && break; sleep 0.1; done
   node "$ROOT/tests/e2e/chromium-extension.test.js" "$WORK/chrome" "http://127.0.0.1:$PORT/" "$SHOP_PORT" user@example.org "$WORK" || FAIL=1
   set_config
 fi
 
+[ "$FAIL" = 0 ] || show_logs
 exit $FAIL

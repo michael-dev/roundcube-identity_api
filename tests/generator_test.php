@@ -4,10 +4,10 @@
 require_once __DIR__ . '/../lib/identity_api_generator.php';
 
 $failed = 0;
-function check($name, $cond)
+function check($name, $cond, $extra = '')
 {
     global $failed;
-    echo ($cond ? "ok   " : "FAIL ") . $name . "\n";
+    echo ($cond ? "ok   " : "FAIL ") . $name . ($cond || $extra === '' ? '' : ' ' . $extra) . "\n";
     $failed += $cond ? 0 : 1;
 }
 
@@ -75,6 +75,7 @@ $g3 = new identity_api_generator(['template' => 's.{shop}.{random}']);
 check('parse custom template', ($g3->parse('s.bookshop.' . str_repeat('a', 8) . '@x.de')['shop'] ?? '') === 'bookshop');
 
 check('shop from url', $g->shop_from_url('https://checkout.gardenshop.example/kasse') === 'gardenshop');
+check('shop from url platform', $g->shop_from_url('https://bookshop.myshopify.com/cart') === 'bookshop');
 check('shop from url co.uk', $g->shop_from_url('https://www.example-tea.co.uk/basket') === 'example-tea');
 check('shop from url umlaut', $g->shop_from_url('https://www.bücherstube.example/') === 'buecherstube');
 check('shop from url punycode', $g->shop_from_url('https://www.xn--grtnerei-grn-gcb06a.example/') === 'gaertnerei-gruen');

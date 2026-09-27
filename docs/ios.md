@@ -70,7 +70,10 @@ takes more steps.
 
 ### Troubleshooting
 
-* **"unauthorized"**: wrong or revoked token, or the token isn't a static one and has expired.
-* **"domain not allowed"**: the domain in the settings isn't allowed on the server.
+* **"no token"** / **"invalid token"** (unauthorized): wrong or revoked token, the token isn't one
+  without renewal and has expired, the admin disabled tokens without renewal (they then expire like
+  normal tokens), or the web server drops the `Authorization` header (Apache: `CGIPassAuth On`).
+* **"rate limit exceeded"** / **"identity limit reached"**: the admin's limits for new addresses were
+  reached.
 * **No notification, nothing copied**: add a **Quick Look** action for *Contents of URL* after step
   2 to see the raw response.

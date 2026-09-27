@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: identity_api – per-shop e-mail identities for Roundcube
-  version: '2.0'
+  version: '2.2'
   summary: Create and manage generated e-mail identities (<prefix>-<shop>-<year>-<random>@domain) of a Roundcube user.
   description: |
     REST API of the Roundcube plugin `identity_api`.
@@ -15,8 +15,8 @@ info:
     Roundcube under *Settings → Preferences → Shop address API*:
     `Authorization: Bearer <token>` (or `X-Identity-Api-Token: <token>`).
 
-    **Token rotation.** If the server has rotation enabled, every authenticated response carries
-    the headers `Identity-Api-Token-Rotate` and `Identity-Api-Token-Expires`. Once
+    **Token rotation.** Every authenticated response carries `Identity-Api-Token-Rotate`
+    (`true`/`false`) and, if the token expires, `Identity-Api-Token-Expires`. Once
     `Identity-Api-Token-Rotate: true`, the client should call `POST /v1/token/rotate` and use the
     returned token from then on. The old token stays valid until the new one is used for the first
     time. A token that is not rotated before `Identity-Api-Token-Expires` stops working. Tokens
@@ -61,6 +61,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Me' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/ServerError' }
   /v1/identities:
     get:
       tags: [identities]
@@ -70,7 +72,7 @@ paths:
       parameters:
         - name: shop
           in: query
-          description: Only addresses for this shop (normalized like on creation, e.g. "Grün" → "gruen")
+          description: Only addresses for this shop name (normalized, e.g. "Grün" → "gruen"; website addresses are not accepted here)
           schema: { type: string }
       responses:
         '200':
@@ -89,6 +91,8 @@ paths:
                     items: { $ref: '#/components/schemas/Identity' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/ServerError' }
     post:
       tags: [identities]
       operationId: createIdentity
@@ -118,6 +122,8 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/ServerError' }
         '403':
           description: '`domain_not_allowed`, `identity_limit_reached`, `identities_disabled`'
           content:
@@ -145,10 +151,15 @@ paths:
       responses:
         '200':
           description: Identity
+          headers:
+            Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
+            Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Identity' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/ServerError' }
         '404': { $ref: '#/components/responses/Problem' }
     delete:
       tags: [identities]
@@ -159,8 +170,14 @@ paths:
         identities that aren't deleted, the address stops receiving mail.
         Only identities created by this plugin (matching a pattern) can be deleted.
       responses:
-        '204': { description: Deleted }
+        '204':
+          description: Deleted
+          headers:
+            Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
+            Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/ServerError' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
           description: '`delete_failed` (e.g. it is the user''s last identity)'
@@ -175,10 +192,15 @@ paths:
       responses:
         '200':
           description: Token status
+          headers:
+            Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
+            Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Token' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/ServerError' }
   /v1/token/rotate:
     post:
       tags: [token]
@@ -191,6 +213,9 @@ paths:
       responses:
         '200':
           description: New token
+          headers:
+            Identity-Api-Token-Rotate: { $ref: '#/components/headers/TokenRotate' }
+            Identity-Api-Token-Expires: { $ref: '#/components/headers/TokenExpires' }
           content:
             application/json:
               schema:
@@ -200,6 +225,8 @@ paths:
                   token: { type: string, description: 'New token, format <user_id>.<token_id>.<secret>' }
                   expires: { type: [string, 'null'], format: date-time }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/ServerError' }
         '409':
           description: '`static_token` (tokens without rotation can''t be rotated)'
           content:
@@ -225,10 +252,24 @@ components:
       schema: { type: string, format: date-time }
   responses:
     Unauthorized:
-      description: Missing, invalid, revoked or expired token (`unauthorized`)
+      description: 'Missing, invalid, revoked or expired token (`unauthorized`; `detail` is "no token" if the request had none)'
       headers:
         WWW-Authenticate:
           schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    MethodNotAllowed:
+      description: Method not supported by this resource (`method_not_allowed`)
+      headers:
+        Allow:
+          description: Supported methods
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ServerError:
+      description: '`no_domain_configured`, `could_not_generate_a_unique_address`, `saving_failed`, `internal_error`'
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }

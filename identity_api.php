@@ -26,6 +26,7 @@ class identity_api extends rcube_plugin
     public const PREF_TEMPLATE = 'identity_api_user_template';
     public const PENDING_MAX  = 3;
     public const PREF_RECENT  = 'identity_api_recent';
+    public const PREF_CREATED = 'identity_api_created';
     public const SESS_TOKEN = 'identity_api_new_token';
 
     public const STATUS_TEXT = [400 => 'Bad Request', 401 => 'Unauthorized', 403 => 'Forbidden', 404 => 'Not Found',
@@ -49,6 +50,9 @@ class identity_api extends rcube_plugin
     /** @var bool Request path ends with "/" (for relative Location headers) */
     private $trailing_slash = false;
 
+    /** @var array Lock files held by this request, per user id (see with_lock()) */
+    private $locks = [];
+
     public function init()
     {
         $this->rc = rcmail::get_instance();
@@ -57,7 +61,7 @@ class identity_api extends rcube_plugin
         $this->add_hook('startup', [$this, 'startup']);
 
         if ($this->rc->task == 'settings') {
-            $this->add_texts('localization/', ['copy', 'copied', 'noexisting', 'apiunreachable']);
+            $this->add_texts('localization/', ['copy', 'copied', 'noexisting', 'apiunreachable', 'apiauthdropped']);
             $this->add_hook('preferences_sections_list', [$this, 'prefs_sections']);
             $this->add_hook('preferences_list', [$this, 'prefs_list']);
             $this->add_hook('preferences_save', [$this, 'prefs_save']);
@@ -115,7 +119,9 @@ class identity_api extends rcube_plugin
             $this->send_problem($e->getCode() ?: 400, $e->error_code, $e->getMessage(), $e->headers);
         }
         catch (Throwable $e) {
-            rcube::raise_error($e, true, false);
+            // Roundcube 1.5 only accepts arrays or Exceptions, not Errors
+            rcube::raise_error(['code' => 500, 'message' => get_class($e) . ': ' . $e->getMessage(),
+                'file' => $e->getFile(), 'line' => $e->getLine()], true, false);
             $this->send_problem(500, 'internal_error', 'internal error');
         }
 
@@ -123,16 +129,22 @@ class identity_api extends rcube_plugin
     }
 
     /**
-     * The user's identities created by this plugin (matching the user's or the
-     * admin's pattern), optionally for one (sanitized) shop, newest first.
-     * Each row gets "parsed" => [prefix, shop, year].
+     * The user's identities created by this plugin, optionally for one
+     * (sanitized) shop, newest first. Each row gets "parsed" => [prefix, shop, year].
+     * Only identities the plugin created (their ids are kept in a preference)
+     * and that still match the user's or the admin's pattern, so addresses
+     * entered by hand are never listed or deleted.
      */
     private function find_identities(rcube_user $user, $shop = null)
     {
         $generators = $this->list_generators($user);
+        $created    = $this->created_ids($user);
         $result     = [];
 
         foreach ($user->list_identities() as $identity) {
+            if (!isset($created[(int) $identity['identity_id']])) {
+                continue;
+            }
             foreach ($generators as $generator) {
                 $parsed = $generator->parse($identity['email']);
                 if ($parsed && ($shop === null || $parsed['shop'] === $shop)) {
@@ -146,6 +158,37 @@ class identity_api extends rcube_plugin
         usort($result, function ($a, $b) { return $b['identity_id'] <=> $a['identity_id']; });
 
         return $result;
+    }
+
+    /**
+     * Ids of the identities created by this plugin (as keys). Versions before
+     * 2.2 didn't record them: then all non-default identities matching a
+     * pattern are taken over once.
+     */
+    private function created_ids(rcube_user $user)
+    {
+        $prefs = (new rcube_user($user->ID))->get_prefs();
+        if (isset($prefs[self::PREF_CREATED])) {
+            return array_flip(array_map('intval', (array) $prefs[self::PREF_CREATED]));
+        }
+
+        $generators = $this->list_generators($user);
+        $ids = [];
+        foreach ($user->list_identities() as $identity) {
+            if (empty($identity['standard'])) {
+                foreach ($generators as $generator) {
+                    if ($generator->parse($identity['email'])) {
+                        $ids[] = (int) $identity['identity_id'];
+                        break;
+                    }
+                }
+            }
+        }
+        $this->update_prefs($user, function ($prefs) use ($ids) {
+            return isset($prefs[self::PREF_CREATED]) ? [] : [self::PREF_CREATED => $ids];
+        });
+
+        return array_flip($ids);
     }
 
     /** Create a new identity from the request parameters (shop, domain, name). */
@@ -185,8 +228,17 @@ class identity_api extends rcube_plugin
             throw new identity_api_exception('domain not allowed', 403);
         }
 
+        // limits are checked and the identity is saved under the user's lock,
+        // so parallel requests can't get past the limits
+        return $this->with_lock($user, function () use ($user, $generator, $shop, $domain) {
+            return $this->insert_identity($user, $generator, $shop, $domain);
+        });
+    }
+
+    private function insert_identity(rcube_user $user, identity_api_generator $generator, $shop, $domain)
+    {
         $max = (int) $this->rc->config->get('identity_api_max_identities', 1000);
-        if ($max > 0 && count($user->list_identities()) >= $max) {
+        if ($max > 0 && count((new rcube_user($user->ID))->list_identities()) >= $max) {
             throw new identity_api_exception('identity limit reached', 403);
         }
 
@@ -213,7 +265,7 @@ class identity_api extends rcube_plugin
             throw new identity_api_exception('address too long, use a shorter shop name or domain', 400, 'address_too_long');
         }
 
-        $name = trim((string) $this->request_param('name'));
+        $name = trim(preg_replace('/[\p{Cc}\p{Zl}\p{Zp}]+/u', ' ', (string) $this->request_param('name')));
         $name = $name !== '' ? mb_substr($name, 0, 128) : $this->default_name($user);
 
         $record = [
@@ -238,9 +290,12 @@ class identity_api extends rcube_plugin
 
         $this->rc->plugins->exec_hook('identity_create_after', ['id' => $insert_id, 'record' => $record]);
 
-        $recent[] = time();
-        $fresh = new rcube_user($user->ID);
-        $fresh->save_prefs([self::PREF_RECENT => array_values($recent)], true);
+        $created = array_keys($this->created_ids($user));
+        $this->update_prefs($user, function ($prefs) use ($recent, $created, $insert_id) {
+            $recent[]  = time();
+            $created[] = (int) $insert_id;
+            return [self::PREF_RECENT => array_values($recent), self::PREF_CREATED => array_values(array_unique($created))];
+        });
 
         rcube::write_log('identity_api', sprintf('user %s created identity %s (shop %s, from %s)',
             $user->get_username(), $record['email'], $shop, rcube_utils::remote_addr()));
@@ -340,7 +395,8 @@ class identity_api extends rcube_plugin
 
         $plugin = $this->rc->plugins->exec_hook('identity_delete', ['id' => $identity['identity_id']]);
         $deleted = empty($plugin['abort']) ? $user->delete_identity($identity['identity_id']) : ($plugin['result'] ?? false);
-        if (!$deleted) {
+        // Roundcube 1.7 returns -1 for the last identity, which is not deleted
+        if ($deleted !== true) {
             throw new identity_api_exception('identity could not be deleted', 409, 'delete_failed');
         }
 
@@ -352,7 +408,7 @@ class identity_api extends rcube_plugin
 
     private function rest_token(rcube_user $user)
     {
-        $prefs = $user->get_prefs();
+        $prefs = (new rcube_user($user->ID))->get_prefs(); // updated by verify_token()
         $token = (array) ($prefs[self::PREF_KEY][$this->token_status['id']] ?? []);
         $time  = function ($ts) { return $ts ? gmdate('Y-m-d\TH:i:s\Z', (int) $ts) : null; };
 
@@ -449,7 +505,10 @@ class identity_api extends rcube_plugin
         $user = $token ? $this->verify_token($token) : null;
 
         if (!$user) {
-            throw new identity_api_exception('unauthorized', 401, null, ['WWW-Authenticate' => 'Bearer realm="identity_api"']);
+            // the detail tells a missing token (e.g. Authorization header dropped by
+            // the web server) from a wrong one, see the check in identity_api.js
+            throw new identity_api_exception($token ? 'invalid token' : 'no token', 401, 'unauthorized',
+                ['WWW-Authenticate' => 'Bearer realm="identity_api"']);
         }
 
         return $user;
@@ -459,7 +518,7 @@ class identity_api extends rcube_plugin
      * Token format: <user_id>.<token_id>.<secret>
      * Only sha256(secret) is stored in the user's preferences.
      *
-     * Rotation: a new secret requested via the "rotate" action is kept as
+     * Rotation: a new secret requested with POST /v1/token/rotate is kept as
      * "pending" next to the current one. The current secret stays valid until
      * a pending one is used for the first time, which then replaces it. So a
      * client that never receives the rotate response keeps working.
@@ -474,9 +533,6 @@ class identity_api extends rcube_plugin
         if (!$user->ID) {
             return null;
         }
-
-        // other plugins' hooks (preferences_update etc.) should see this user
-        $this->rc->user = $user;
 
         $prefs  = $user->get_prefs();
         $tokens = (array) ($prefs[self::PREF_KEY] ?? []);
@@ -500,6 +556,9 @@ class identity_api extends rcube_plugin
                 return null;
             }
         }
+
+        // other plugins' hooks (identity_create, preferences_update etc.) should see this user
+        $this->rc->user = $user;
 
         // account state: locked by login_rate_limit, no webmail login for too long, other plugins
         if ($user->is_locked()) {
@@ -537,6 +596,13 @@ class identity_api extends rcube_plugin
                     return $tokens; // revoked meanwhile
                 }
                 if ($promote) {
+                    $still = false;
+                    foreach ((array) ($tokens[$id]['pending'] ?? []) as $pending) {
+                        $still = $still || hash_equals((string) ($pending['hash'] ?? ''), $promote['hash']);
+                    }
+                    if (!$still) {
+                        return $tokens; // promoted or revoked by a parallel request
+                    }
                     // first use of a rotated secret: it replaces the old one
                     $tokens[$id]['hash']    = $promote['hash'];
                     $tokens[$id]['pending'] = [];
@@ -564,15 +630,76 @@ class identity_api extends rcube_plugin
      */
     private function update_tokens(rcube_user $user, callable $fn)
     {
-        $fresh  = new rcube_user($user->ID);
-        $prefs  = $fresh->get_prefs();
-        $tokens = $fn((array) ($prefs[self::PREF_KEY] ?? []));
-        $fresh->save_prefs([self::PREF_KEY => $tokens], true);
+        $changes = $this->update_prefs($user, function ($prefs) use ($fn) {
+            return [self::PREF_KEY => $fn((array) ($prefs[self::PREF_KEY] ?? []))];
+        });
 
-        return $tokens;
+        return $changes[self::PREF_KEY];
     }
 
-    /** Timestamps of identities created through the API in the last hour. */
+    /**
+     * Changes preferences of the user based on their current state in the
+     * database (not the copy loaded at the start of the request), under the
+     * user's lock. $fn gets the current preferences and returns the changes.
+     */
+    private function update_prefs(rcube_user $user, callable $fn)
+    {
+        return $this->with_lock($user, function () use ($user, $fn) {
+            $fresh   = new rcube_user($user->ID);
+            $changes = $fn($fresh->get_prefs());
+            if ($changes && !$fresh->save_prefs($changes, true)) {
+                throw new identity_api_exception('saving preferences failed', 500, 'saving_failed');
+            }
+            // keep the request's copies up to date, core may save them later
+            foreach ([$user, $this->rc->user] as $u) {
+                if ($u && $u->ID == $user->ID && is_array($u->prefs)) {
+                    $u->prefs = $changes + $u->prefs;
+                }
+            }
+            return $changes;
+        });
+    }
+
+    /**
+     * Runs $fn while holding an exclusive lock for the user (a lock file in
+     * Roundcube's temp_dir), so parallel requests can't overwrite each other's
+     * changes of tokens and limits. Nested calls reuse the lock.
+     */
+    private function with_lock(rcube_user $user, callable $fn)
+    {
+        $uid = (int) $user->ID;
+        if (!empty($this->locks[$uid])) {
+            return $fn();
+        }
+
+        $dir = (string) $this->rc->config->get('temp_dir') ?: sys_get_temp_dir();
+        $fp  = @fopen(rtrim($dir, '/') . '/identity_api-' . $uid . '.lock', 'c');
+        // Wait at most 3 seconds, then go on without the lock: with SQLite, a
+        // parallel request waiting here can hold a database lock this request
+        // needs (Roundcube 1.5 keeps result sets open), which must not hang.
+        for ($i = 0; $fp && !flock($fp, LOCK_EX | LOCK_NB); $i++) {
+            if ($i >= 150) {
+                fclose($fp);
+                $fp = null;
+                break;
+            }
+            usleep(20000);
+        }
+        $this->locks[$uid] = true;
+
+        try {
+            return $fn();
+        }
+        finally {
+            unset($this->locks[$uid]);
+            if ($fp) {
+                flock($fp, LOCK_UN);
+                fclose($fp);
+            }
+        }
+    }
+
+    /** Timestamps of identities created in the last hour (API and settings generator). */
     private function recent_creations(rcube_user $user)
     {
         $fresh = new rcube_user($user->ID);
@@ -657,18 +784,16 @@ class identity_api extends rcube_plugin
             return $args;
         }
 
-        $tokens   = (array) $this->rc->config->get(self::PREF_KEY, []);
         $lifetime = $this->token_lifetime();
-        $valid    = $this->purge_expired($tokens, $lifetime);
-        foreach ($valid as $id => $token) {
-            if (is_array($token) && !isset($token['issued'])) {
-                $valid[$id]['issued'] = time(); // token from before rotation support
+        $tokens   = $this->update_tokens($this->rc->user, function ($tokens) use ($lifetime) {
+            $valid = $this->purge_expired($tokens, $lifetime);
+            foreach ($valid as $id => $token) {
+                if (is_array($token) && !isset($token['issued'])) {
+                    $valid[$id]['issued'] = time(); // token from before rotation support
+                }
             }
-        }
-        if ($valid !== $tokens) {
-            $this->rc->user->save_prefs([self::PREF_KEY => $valid]);
-            $tokens = $valid;
-        }
+            return $valid;
+        });
         $blocks = [];
 
         // address generator
@@ -722,11 +847,9 @@ class identity_api extends rcube_plugin
             $this->rc->session->remove(self::SESS_TOKEN);
             $input = new html_inputfield(['id' => 'identityapi-newtoken', 'size' => 50, 'readonly' => 'readonly']);
 
-            // "connect" button: the browser extension's content script finds this
-            // element, enables the button and takes over URL and token on click
-            // "connect" button: the browser extension intercepts the click (without
-            // touching the page before, so pages can't detect it) and takes over the
-            // token; without extension, the click just shows a hint
+            // "connect" button: the browser extension handles the click and takes over
+            // API URL and token after a confirmation in its own window; without the
+            // extension, the click just shows a hint
             $missing = json_encode($this->gettext('connectmissing'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
             $button  = html::tag('button', ['type' => 'button', 'class' => 'button btn btn-secondary',
                 'onclick' => "this.parentNode.querySelector('.hint').textContent = $missing; return false"],
@@ -949,7 +1072,12 @@ class identity_api extends rcube_plugin
             $args['prefs'][self::PREF_DOMAINS] = $domains;
         }
 
-        $tokens = (array) $this->rc->config->get(self::PREF_KEY, []);
+        // Core saves the preferences merged into the copy loaded at the start of
+        // the request; refresh it, so token rotations and limits from API requests
+        // in the meantime aren't overwritten.
+        $fresh = (new rcube_user($this->rc->user->ID))->get_prefs();
+        $this->rc->user->prefs = $fresh;
+        $tokens = (array) ($fresh[self::PREF_KEY] ?? []);
 
         foreach ((array) rcube_utils::get_input_value('_identity_api_revoke', rcube_utils::INPUT_POST) as $id) {
             if (is_string($id)) {
@@ -991,8 +1119,19 @@ class identity_api extends rcube_plugin
         }
     }
 
+    /** AJAX actions only as POST with Roundcube's request token (no cross-site requests). */
+    private function ui_request_check()
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            $this->rc->output->show_message('errorsaving', 'error');
+            $this->rc->output->send();
+        }
+        $this->rc->request_security_check(rcube_utils::INPUT_GET | rcube_utils::INPUT_POST);
+    }
+
     public function ui_create()
     {
+        $this->ui_request_check();
         $this->add_texts('localization/');
         $this->ui_shop_input();
         try {
@@ -1010,6 +1149,7 @@ class identity_api extends rcube_plugin
 
     public function ui_list()
     {
+        $this->ui_request_check();
         $this->add_texts('localization/');
         $this->ui_shop_input();
         $shop   = $this->generator()->sanitize_shop($this->request_param('shop'))
@@ -1033,19 +1173,20 @@ class identity_api extends rcube_plugin
     // ------------------------------------------------------------------
     // Helpers
 
-    /** Generator for the user's pattern (or the admin pattern / a given one). */
     /** Base URL of the REST API, relative to Roundcube's URL or absolute (identity_api_url). */
     private function api_url()
     {
         $url = trim((string) $this->rc->config->get('identity_api_url', 'api/identity/'));
-        if ($url === '' || !preg_match('~^(https?://[^/?#]+)?/?[^?#]*$~i', $url)) {
+        // absolute http(s) URL, or a path relative to Roundcube (not protocol relative)
+        if (!preg_match('~^https?://[^/?#\s]+(/[^?#\s]*)?$~i', $url) && !preg_match('~^(?!//)[^:?#\s]+$~', $url)) {
             $url = 'api/identity/';
         }
 
         return rtrim($url, '/') . '/';
     }
 
-    private function generator(rcube_user $user = null, $template = null)
+    /** Generator for the user's pattern (or the admin pattern / a given one). */
+    private function generator(?rcube_user $user = null, $template = null)
     {
         return new identity_api_generator([
             'template'       => $template ?: ($user ? $this->user_template($user) : $this->admin_template()),
@@ -1298,12 +1439,9 @@ class identity_api extends rcube_plugin
     }
 
     /**
-     * Check all identities of all users (including deleted ones), the mail
-     * server routes by identity so addresses must be globally unique.
-     */
-    /**
-     * Address used by any identity (also deleted ones), optionally of other users
-     * than $except_user. Case-insensitive.
+     * Address used by any identity of any user (also deleted ones: the mail
+     * server routes by identity, so addresses must be globally unique),
+     * optionally except those of $except_user. Case-insensitive.
      */
     private function email_exists($email, $except_user = null)
     {
@@ -1335,8 +1473,12 @@ class identity_api extends rcube_plugin
             return (string) $body[$name];
         }
 
-        return rcube_utils::get_input_string('_' . $name, rcube_utils::INPUT_GPC)
-            ?: rcube_utils::get_input_string($name, rcube_utils::INPUT_GPC);
+        $value = rcube_utils::get_input_string('_' . $name, rcube_utils::INPUT_GP);
+        if ($value === null || $value === '') {
+            $value = rcube_utils::get_input_string($name, rcube_utils::INPUT_GP);
+        }
+
+        return $value;
     }
 
     /** RFC 9457 problem details */

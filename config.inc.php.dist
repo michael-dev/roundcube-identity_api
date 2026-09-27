@@ -26,7 +26,9 @@ $config['identity_api_domains'] = [];
 // to Roundcube's $config['dont_override'].
 $config['identity_api_allowed_domains'] = [];
 
-// Local part template. Placeholders: {prefix}, {shop}, {year}, {random}
+// Local part template. Placeholders: {prefix}, {shop}, {year}, {random};
+// {shop} and {random} are required. Users can set their own pattern (lock it
+// by adding 'identity_api_user_template' to $config['dont_override']).
 $config['identity_api_template'] = '{prefix}-{shop}-{year}-{random}';
 
 // Default for {prefix}. Users can set their own prefix in the settings
@@ -34,7 +36,9 @@ $config['identity_api_template'] = '{prefix}-{shop}-{year}-{random}';
 // Empty: first letter of the username ("michael@example.org" -> "m").
 $config['identity_api_default_prefix'] = '';
 
-// Length and characters of {random}
+// Length (at least 4) and characters of {random}. Changing these (or the
+// pattern) hides older addresses from listing/deleting through the API, and
+// the Postfix REGEXP (docs/postfix.md) must match the new format.
 $config['identity_api_random_length'] = 8;
 $config['identity_api_random_chars'] = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -44,8 +48,8 @@ $config['identity_api_shop_maxlength'] = 30;
 // Maximum number of identities per user (0 = unlimited)
 $config['identity_api_max_identities'] = 1000;
 
-// Maximum number of identities a user can create through the API per hour
-// (0 = unlimited)
+// Maximum number of identities a user can create per hour through the API or
+// the address generator in the settings (0 = unlimited)
 $config['identity_api_rate_limit'] = 30;
 
 // Reject tokens of users who have not logged in to the webmail for this many
