@@ -9,7 +9,7 @@ Roundcube plugin that gives every online shop its own e-mail address, created on
 The addresses are stored as Roundcube identities. The plugin offers
 
 * the **shop address REST API** ([docs/openapi.yaml](docs/openapi.yaml)), token-authenticated, used by
-  the browser extension [Shop-Adressen](https://github.com/michael-dev/browser-identity_api) for
+  the browser extension [Shop Addresses](https://github.com/michael-dev/browser-identity_api) (Shop-Adressen) for
   Firefox and Chrome, iOS Shortcuts and other clients,
 * an **address generator** in *Settings → Preferences → Shop address API* (works in any browser,
   e.g. on an iPhone, see [docs/ios.md](docs/ios.md)),

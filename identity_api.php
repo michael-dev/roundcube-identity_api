@@ -5,7 +5,7 @@
  *
  * Token-authenticated REST API to create per-shop identities
  * (e.g. m-bookshop-2026-k3x9q2ab@example.org) on the fly, used by the
- * "Shop-Adressen" browser extension.
+ * "Shop Addresses" (Shop-Adressen) browser extension.
  *
  * Endpoint: <roundcube-url>/api/identity/v1/... (rewrite rule, see README and docs/openapi.yaml)
  * Auth:     header "Authorization: Bearer <token>" (or "X-Identity-Api-Token: <token>")
