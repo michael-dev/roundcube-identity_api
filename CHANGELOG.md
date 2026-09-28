@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3
 
 * The plugin has its own repository, `michael-dev/roundcube-identity_api`, with `composer.json` at
   its root, and is installed from Packagist: `composer require michael-dev/identity_api`. The
