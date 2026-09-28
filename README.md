@@ -272,8 +272,8 @@ Packagist setup (once): submit `https://github.com/michael-dev/roundcube-identit
   profile, or add the webhook yourself (*Settings → Webhooks*, payload URL
   `https://packagist.org/api/github?username=<packagist user>`, content type `application/json`,
   secret: your Packagist API token, push events), or
-* set the repository variable `PACKAGIST_USERNAME` and the secret `PACKAGIST_TOKEN` (Packagist API
-  token): the workflow *Packagist* then notifies Packagist on every push to `main` and after every
+* set the repository variable `PACKAGIST_USERNAME` and the secret `PACKAGIST_TOKEN` (the **safe** API
+  token from your Packagist profile, which can only trigger package updates): the workflow *Packagist* then notifies Packagist on every push to `main` and after every
   release.
 
 Until 2.2 the plugin was developed together with the browser extension in

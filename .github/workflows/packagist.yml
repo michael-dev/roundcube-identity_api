@@ -3,7 +3,8 @@ name: Packagist
 # Tells Packagist to update michael-dev/identity_api right away: on pushes to main
 # (dev-main) and after every release (called by the release workflow, because tags
 # created by a workflow trigger no push event). Needs the repository variable
-# PACKAGIST_USERNAME and the secret PACKAGIST_TOKEN (Packagist → Profile → API Token);
+# PACKAGIST_USERNAME and the secret PACKAGIST_TOKEN: the SAFE API token from the Packagist
+# profile (it can only trigger updates, the MAIN token is not needed);
 # skipped without them. Not needed if the Packagist GitHub hook is set up (the package
 # page on packagist.org then shows no "not auto-updated" warning).
 on:
@@ -28,6 +29,7 @@ jobs:
             exit 0
           fi
           curl -fsS -X POST -H 'Content-Type: application/json' \
-            "https://packagist.org/api/update-package?username=$PACKAGIST_USERNAME&apiToken=$PACKAGIST_TOKEN" \
-            -d "{\"repository\":{\"url\":\"https://github.com/$GITHUB_REPOSITORY\"}}"
+            -H "Authorization: Bearer $PACKAGIST_USERNAME:$PACKAGIST_TOKEN" \
+            https://packagist.org/api/update-package \
+            -d "{\"repository\":\"https://github.com/$GITHUB_REPOSITORY\"}"
           echo
