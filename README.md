@@ -75,7 +75,7 @@ maintenance mode), because API requests end in this plugin's `startup` hook.
 | Option | Default | Description |
 |---|---|---|
 | `identity_api_template` | `{prefix}-{shop}-{year}-{random}` | Default pattern for new addresses (users can set their own). Placeholders: `{prefix}`, `{shop}`, `{year}`, `{random}` (`{shop}` and `{random}` are required). |
-| `identity_api_default_prefix` | `''` | Default for `{prefix}`. Empty: first letter of the username (`michael@…` → `m`). |
+| `identity_api_default_prefix` | `''` | Default for `{prefix}`. Empty: first letter of the username (`manuel@…` → `m`). |
 | `identity_api_url` | `'api/identity/'` | URL of the REST API, relative to Roundcube's URL or absolute. The web server maps it to Roundcube with a rewrite rule (see [REST API](#rest-api)). |
 | `identity_api_domains` | `[]` | Default domains if a user hasn't configured any. The first one is the default. The placeholders `%n`, `%t` and `%d` (e.g. `%d`: `webmail.example.org` → `example.org`) come from the Host header and are only used if Roundcube's `trusted_host_patterns` is set. Empty: domain of the user's default identity. |
 | `identity_api_allowed_domains` | `[]` | Restricts the domains users may configure themselves, e.g. `['example.org', '*.example.org']`. Empty: any domain (like `identities_level` 0). It doesn't apply to `identity_api_domains` or the fallback. |
