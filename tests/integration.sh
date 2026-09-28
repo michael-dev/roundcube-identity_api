@@ -463,7 +463,9 @@ if [ "${E2E:-0}" = 1 ]; then
   php -S "127.0.0.1:$SHOP_PORT" -t "$ROOT/tests/e2e" >"$WORK/shop.log" 2>&1 &
   SHOP=$!
   # imap_host: Roundcube >= 1.6, default_host/default_port: 1.5
-  set_config "\$config['imap_host'] = 'localhost:$IMAP_PORT';" "\$config['default_host'] = 'localhost';" "\$config['default_port'] = $IMAP_PORT;"
+  # German UI like the extension (the settings test above switched the user to en_US)
+  php -r '$p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null); $p->exec("UPDATE users SET language = \"de_DE\"");'
+  set_config "\$config['language'] = 'de_DE';" "\$config['imap_host'] = 'localhost:$IMAP_PORT';" "\$config['default_host'] = 'localhost';" "\$config['default_port'] = $IMAP_PORT;"
   node "$ROOT/scripts/build-chrome.js" "$WORK/chrome" >/dev/null
   rm -rf "$WORK/chromium-profile"
   wait_http "$SHOP_PORT"

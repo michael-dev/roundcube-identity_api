@@ -1,16 +1,38 @@
 {
     "name": "michael-dev/identity_api",
     "type": "roundcube-plugin",
-    "description": "Create per-shop e-mail identities (<prefix>-<shop>-<year>-<random>@domain) on the fly through a token-authenticated REST API, e.g. from the companion browser extension for Firefox and Chrome.",
-    "keywords": ["roundcube", "plugin", "identity", "identities", "alias", "privacy", "firefox", "chrome"],
+    "description": "Per-shop e-mail addresses (<prefix>-<shop>-<year>-<random>@domain) as Roundcube identities, created on the fly through a token-authenticated REST API, e.g. from the browser extension Shop-Adressen for Firefox and Chrome.",
+    "keywords": [
+        "roundcube",
+        "plugin",
+        "identity",
+        "identities",
+        "alias",
+        "email",
+        "privacy",
+        "shop",
+        "rest-api"
+    ],
     "homepage": "https://github.com/michael-dev/ff-rc-identity",
     "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "michael-dev",
+            "homepage": "https://github.com/michael-dev"
+        }
+    ],
     "support": {
         "issues": "https://github.com/michael-dev/ff-rc-identity/issues",
-        "source": "https://github.com/michael-dev/ff-rc-identity"
+        "source": "https://github.com/michael-dev/ff-rc-identity",
+        "docs": "https://github.com/michael-dev/ff-rc-identity#readme"
     },
     "require": {
         "php": ">=7.3.0",
         "roundcube/plugin-installer": ">=0.1.3 <1.0"
+    },
+    "extra": {
+        "roundcube": {
+            "min-version": "1.5.0"
+        }
     }
 }

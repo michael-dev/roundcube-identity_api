@@ -79,8 +79,8 @@ check('legacy token migrated on display', isset($fresh->get_prefs()['identity_ap
 // prefix and domain validation, messages escaped
 $args = save(['_identity_api_prefix' => '!!!']);
 check('invalid prefix rejected', !empty($args['abort']));
-$args = save(['_identity_api_prefix' => ' Mi-Ke ']);
-check('prefix normalized', empty($args['abort']) && $rc->config->get('identity_api_prefix') === 'mike');
+$args = save(['_identity_api_prefix' => ' Al-Ex ']);
+check('prefix normalized', empty($args['abort']) && $rc->config->get('identity_api_prefix') === 'alex');
 $args = save(['_identity_api_domains' => "example.org\nfoo&bar"]);
 check('invalid domain rejected, escaped', !empty($args['abort']) && strpos($args['message'], 'foo&amp;bar') !== false,
     $args['message'] ?? '');
