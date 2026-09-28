@@ -237,7 +237,7 @@ class identity_api extends rcube_plugin
 
     private function insert_identity(rcube_user $user, identity_api_generator $generator, $shop, $domain)
     {
-        $max = (int) $this->rc->config->get('identity_api_max_identities', 1000);
+        $max = (int) $this->rc->config->get('identity_api_max_identities', 5000);
         if ($max > 0 && count((new rcube_user($user->ID))->list_identities()) >= $max) {
             throw new identity_api_exception('identity limit reached', 403);
         }
@@ -349,7 +349,7 @@ class identity_api extends rcube_plugin
             'domains'        => $domains,
             'default_domain' => $domains[0],
             'limits'         => [
-                'max_identities'     => (int) $this->rc->config->get('identity_api_max_identities', 1000) ?: null,
+                'max_identities'     => (int) $this->rc->config->get('identity_api_max_identities', 5000) ?: null,
                 'identities_per_hour' => (int) $this->rc->config->get('identity_api_rate_limit', 30) ?: null,
             ],
         ]);

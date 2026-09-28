@@ -2,7 +2,14 @@
 
 ## 2.2 (unreleased)
 
-Fixes from a review of code and documentation.
+* **The browser extension is no longer tied to Roundcube:** it is called “Shop-Adressen” (before:
+  “Shop-Adressen für Roundcube”) and works with every mail server offering the shop address API
+  (docs/openapi.yaml, now “Shop address API”); the README describes what another server needs,
+  including the connect button. The Roundcube plugin is the reference implementation. The connect
+  button no longer has to be on a Roundcube settings page.
+* `identity_api_max_identities` (identities per user): default 5000 instead of 1000.
+
+Fixes from a review of code and documentation:
 
 * **Extension, "Connect":** any website can show such a button, so the extension no longer stores
   anything after the page's confirmation dialog. It checks the token and asks in its own page, which

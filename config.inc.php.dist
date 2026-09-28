@@ -46,7 +46,7 @@ $config['identity_api_random_chars'] = 'abcdefghijklmnopqrstuvwxyz0123456789';
 $config['identity_api_shop_maxlength'] = 30;
 
 // Maximum number of identities per user (0 = unlimited)
-$config['identity_api_max_identities'] = 1000;
+$config['identity_api_max_identities'] = 5000;
 
 // Maximum number of identities a user can create per hour through the API or
 // the address generator in the settings (0 = unlimited)

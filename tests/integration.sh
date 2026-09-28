@@ -313,6 +313,12 @@ check "user pattern create"  201 '"email":"web\.gardenshop\.[a-z0-9]{8}@kunden\.
 check "list both patterns"   200 '"email":"web\.gardenshop\..*"email":"fam-gardenshop-' "${B[@]}" "${V1}/v1/identities?shop=gardenshop"
 set_prefs 'unset($prefs["identity_api_user_template"]);'
 
+# identities per user: default 5000, configurable
+check "max identities default 5000" 200 '"max_identities":5000' "${B[@]}" "${V1}/v1/me"
+set_config "\$config['identity_api_max_identities'] = 2;"
+check "max identities reached" 403 '"code":"identity_limit_reached"' "${B[@]}" -d 'shop=gardenshop' "${V1}/v1/identities"
+set_config
+
 # identities_level 1: core only allows the login address
 set_config "\$config['identities_level'] = 1;"
 check "identities_level 1" 403 '"code":"identities_disabled"' "${B[@]}" -d 'shop=gardenshop' "${V1}/v1/identities"

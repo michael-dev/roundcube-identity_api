@@ -1,18 +1,20 @@
 openapi: 3.1.0
 info:
-  title: identity_api – per-shop e-mail identities for Roundcube
+  title: Shop address API
   version: '2.2'
-  summary: Create and manage generated e-mail identities (<prefix>-<shop>-<year>-<random>@domain) of a Roundcube user.
+  summary: Create and manage generated per-shop e-mail addresses (<prefix>-<shop>-<year>-<random>@domain) of a mail account.
   description: |
-    REST API of the Roundcube plugin `identity_api`.
+    REST API a mail server offers to create per-shop e-mail addresses (identities, aliases) of the
+    logged in account on the fly. The browser extension "Shop-Adressen" works with any server that
+    implements it; the Roundcube plugin `identity_api` is the reference implementation. What a client
+    minimally needs is described in the README (*Other mail servers*).
 
-    **Base URL.** `<roundcube-url>/api/identity`, e.g.
-    `https://webmail.example.org/api/identity/v1/identities`. The web server maps these URLs to
-    Roundcube with a rewrite rule (see the README); Roundcube shows the actual API URL under
-    *Settings → Preferences → Shop address API*.
+    **Base URL.** Any URL, shown to the user by the server, e.g.
+    `https://webmail.example.org/api/identity/v1/identities` (Roundcube: `<roundcube-url>/api/identity`,
+    shown under *Settings → Preferences → Shop address API*).
 
-    **Authentication.** Every request needs a personal access token, created by the user in
-    Roundcube under *Settings → Preferences → Shop address API*:
+    **Authentication.** Every request needs a personal access token, created by the user on the server
+    (Roundcube: *Settings → Preferences → Shop address API*):
     `Authorization: Bearer <token>` (or `X-Identity-Api-Token: <token>`).
 
     **Token rotation.** Every authenticated response carries `Identity-Api-Token-Rotate`
@@ -31,7 +33,7 @@ info:
     url: https://github.com/michael-dev/ff-rc-identity
 servers:
   - url: 'https://{host}/api/identity'
-    description: Roundcube at the root of its host (the default API location)
+    description: Example (Roundcube plugin at the root of its host); other servers use their own URL
     variables:
       host:
         default: webmail.example.org
@@ -166,9 +168,9 @@ paths:
       operationId: deleteIdentity
       summary: Delete a generated identity
       description: |
-        Roundcube marks the identity as deleted. If the mail server only delivers to
-        identities that aren't deleted, the address stops receiving mail.
-        Only identities created by this plugin (matching a pattern) can be deleted.
+        The address stops receiving mail (the Roundcube plugin marks the identity as deleted,
+        the mail server only delivers to identities that aren't). Only addresses created through
+        this API can be deleted, never addresses the user entered by hand.
       responses:
         '204':
           description: Deleted
@@ -311,7 +313,7 @@ components:
       type: object
       required: [user, domains, default_domain, pattern]
       properties:
-        user: { type: string, description: Roundcube username }
+        user: { type: string, description: Account name (Roundcube username) }
         name: { type: string }
         prefix: { type: string, example: m }
         pattern: { type: string, example: '{prefix}-{shop}-{year}-{random}' }
