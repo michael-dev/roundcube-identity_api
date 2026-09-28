@@ -13,7 +13,7 @@
         "shop",
         "rest-api"
     ],
-    "homepage": "https://github.com/michael-dev/ff-rc-identity",
+    "homepage": "https://github.com/michael-dev/browser-identity_api",
     "license": "GPL-3.0-or-later",
     "authors": [
         {
@@ -22,9 +22,9 @@
         }
     ],
     "support": {
-        "issues": "https://github.com/michael-dev/ff-rc-identity/issues",
-        "source": "https://github.com/michael-dev/ff-rc-identity",
-        "docs": "https://github.com/michael-dev/ff-rc-identity#readme"
+        "issues": "https://github.com/michael-dev/browser-identity_api/issues",
+        "source": "https://github.com/michael-dev/browser-identity_api",
+        "docs": "https://github.com/michael-dev/browser-identity_api#readme"
     },
     "require": {
         "php": ">=7.3.0",

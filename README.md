@@ -18,7 +18,7 @@ The addresses are stored as Roundcube identities. The plugin offers
 Supported: Roundcube 1.5, 1.6 and 1.7, PHP 7.3 or later.
 
 Full documentation, the browser extension and guides (Postfix, iOS):
-<https://github.com/michael-dev/ff-rc-identity>
+<https://github.com/michael-dev/browser-identity_api>
 
 ## Installation
 

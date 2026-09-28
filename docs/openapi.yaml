@@ -30,7 +30,7 @@ info:
     name: GPL-3.0-or-later
     identifier: GPL-3.0-or-later
   contact:
-    url: https://github.com/michael-dev/ff-rc-identity
+    url: https://github.com/michael-dev/browser-identity_api
 servers:
   - url: 'https://{host}/api/identity'
     description: Example (Roundcube plugin at the root of its host); other servers use their own URL

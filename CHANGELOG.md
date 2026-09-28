@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+* The repository is now `michael-dev/browser-identity_api` (before: `ff-rc-identity`, GitHub
+  redirects the old links); the Roundcube plugin is also published as its own repository
+  `michael-dev/roundcube-identity_api` for Packagist. The add-on ID `shop-adressen@ff-rc-identity`
+  stays, so installed extensions keep receiving updates.
+
 ## 2.2
 
 * Publishing prepared ([docs/publishing.md](docs/publishing.md)): the release workflow mirrors the
