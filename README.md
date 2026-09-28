@@ -265,8 +265,16 @@ reads the tags of this repository (`composer.json` at its root) and installs Git
 tag; files marked `export-ignore` in `.gitattributes` (tests, docs, CI) are not part of it.
 
 Packagist setup (once): submit `https://github.com/michael-dev/roundcube-identity_api` on
-<https://packagist.org/packages/submit>. With a Packagist account connected to GitHub, new tags are
-picked up automatically; otherwise set up the GitHub hook as described on the package page.
+<https://packagist.org/packages/submit>. For automatic updates, either
+
+* let Packagist set up its GitHub hook: log in to Packagist via GitHub (grant access to the
+  repository) and, if the package page still warns that it is not auto-updated, use *Sync* on your
+  profile, or add the webhook yourself (*Settings → Webhooks*, payload URL
+  `https://packagist.org/api/github?username=<packagist user>`, content type `application/json`,
+  secret: your Packagist API token, push events), or
+* set the repository variable `PACKAGIST_USERNAME` and the secret `PACKAGIST_TOKEN` (Packagist API
+  token): the workflow *Packagist* then notifies Packagist on every push to `main` and after every
+  release.
 
 Until 2.2 the plugin was developed together with the browser extension in
 [browser-identity_api](https://github.com/michael-dev/browser-identity_api) (folder `plugin/`); this

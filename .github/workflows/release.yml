@@ -77,3 +77,9 @@ jobs:
           NOTES
           gh release create "$TAG" --title "$VERSION" --notes-file notes.md --target "$TARGET" \
             "dist/identity_api-$VERSION.tar.gz" "dist/identity_api-$VERSION.zip"
+
+  # tags created by this workflow trigger no push event, so tell Packagist directly
+  packagist:
+    needs: release
+    uses: ./.github/workflows/packagist.yml
+    secrets: inherit

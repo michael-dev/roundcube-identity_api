@@ -10,6 +10,8 @@
   [browser-identity_api](https://github.com/michael-dev/browser-identity_api) (before:
   `ff-rc-identity`). Up to 2.2 this changelog covers both.
 * The release archives are made with `git archive` (without tests and docs).
+* Workflow *Packagist*: notifies Packagist on pushes to `main` and after releases
+  (`PACKAGIST_USERNAME`, `PACKAGIST_TOKEN`), unless the Packagist GitHub hook is used.
 
 ## 2.2
 
