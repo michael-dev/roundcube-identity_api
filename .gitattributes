@@ -1,0 +1,7 @@
+# not part of the plugin package (Composer/Packagist downloads GitHub's archive of a tag)
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.github export-ignore
+/Makefile export-ignore
+/docs export-ignore
+/tests export-ignore

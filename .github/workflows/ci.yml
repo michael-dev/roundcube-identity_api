@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+# a newer push to the same branch makes older runs obsolete
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plugin:
+    name: Roundcube ${{ matrix.roundcube }} / PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { roundcube: '1.5.15', php: '7.3' }
+          - { roundcube: '1.6.19', php: '8.1' }
+          - { roundcube: '1.7.4',  php: '8.4' }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, intl, mbstring
+          tools: composer
+
+      - name: Syntax check
+        run: for f in *.php lib/*.php localization/*.inc config.inc.php.dist tests/*.php; do php -l "$f"; done
+
+      - name: Unit tests
+        run: make test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # the browser extension's tests run against this server (API client, end-to-end in Chromium)
+      - name: Check out the browser extension
+        uses: actions/checkout@v4
+        with:
+          repository: michael-dev/browser-identity_api
+          path: browser-extension
+
+      - name: Install Playwright with Chromium (end-to-end test of the Chrome extension)
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: Integration test, incl. end-to-end test with the real Chrome extension
+        run: make integration-test
+        env:
+          RC_VERSION: ${{ matrix.roundcube }}
+          CLIENT_TEST: ${{ github.workspace }}/browser-extension/tests/client.sh
+          E2E: 1
+          WORK: ${{ runner.temp }}/it
+
+      - name: Upload logs and screenshots of a failed test
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-${{ matrix.roundcube }}
+          path: |
+            ${{ runner.temp }}/it/*.log
+            ${{ runner.temp }}/it/*.png
+            ${{ runner.temp }}/it/roundcubemail-*/logs/
+          if-no-files-found: ignore
+
+      - name: Install the plugin with Composer
+        run: make composer-test
+        env:
+          RC_VERSION: ${{ matrix.roundcube }}
+
+  plugin-mysql:
+    name: Roundcube 1.6.19 / MariaDB
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: roundcube_test
+          MARIADB_USER: roundcube
+          MARIADB_PASSWORD: roundcube
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite, pdo_mysql, intl, mbstring
+          tools: none
+
+      - name: Integration test on MariaDB
+        run: make integration-test
+        env:
+          DB: mysql
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+
+  web-servers:
+    name: Rewrite rules (nginx, Apache with PHP-FPM)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nginx, Apache and PHP-FPM
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q nginx apache2 \
+            php8.3-cli php8.3-fpm php8.3-sqlite3 php8.3-intl php8.3-mbstring php8.3-xml php8.3-curl
+          sudo systemctl stop nginx apache2 php8.3-fpm || true
+
+      - name: Integration test through nginx with the README rule
+        run: make integration-test
+        env:
+          WEB: nginx
+          FPM: /usr/sbin/php-fpm8.3
+          PORT: 8089
+
+      - name: Integration test through Apache with the README rule (Roundcube 1.6 .htaccess)
+        run: make integration-test
+        env:
+          WEB: apache
+          FPM: /usr/sbin/php-fpm8.3
+          PORT: 8090
+
+      - name: Integration test through Apache with the README rule (Roundcube 1.7 public_html)
+        run: make integration-test
+        env:
+          WEB: apache
+          FPM: /usr/sbin/php-fpm8.3
+          PORT: 8091
+          RC_VERSION: 1.7.4
+
+  postfix-guide:
+    name: Postfix guide (postmap + triggers)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Postfix (MySQL maps) and MariaDB client
+        run: |
+          echo "postfix postfix/main_mailer_type select No configuration" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q postfix-mysql mariadb-client
+
+      - name: Test docs/postfix.md
+        run: make postfix-test
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_ROOT_PASSWORD: root

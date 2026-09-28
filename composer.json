@@ -13,7 +13,7 @@
         "shop",
         "rest-api"
     ],
-    "homepage": "https://github.com/michael-dev/browser-identity_api",
+    "homepage": "https://github.com/michael-dev/roundcube-identity_api",
     "license": "GPL-3.0-or-later",
     "authors": [
         {
@@ -22,9 +22,9 @@
         }
     ],
     "support": {
-        "issues": "https://github.com/michael-dev/browser-identity_api/issues",
-        "source": "https://github.com/michael-dev/browser-identity_api",
-        "docs": "https://github.com/michael-dev/browser-identity_api#readme"
+        "issues": "https://github.com/michael-dev/roundcube-identity_api/issues",
+        "source": "https://github.com/michael-dev/roundcube-identity_api",
+        "docs": "https://github.com/michael-dev/roundcube-identity_api#readme"
     },
     "require": {
         "php": ">=7.3.0",

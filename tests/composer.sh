@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Installs the plugin archive with Composer into Roundcube, through a static
-# Composer repository like the one published with every release
-# (scripts/composer-repo.js). Usage: tests/composer.sh <identity_api-*.zip>
+# Installs the plugin with Composer into Roundcube, from an archive of the
+# repository like the one Packagist offers (git archive, see make archive),
+# through a local Composer repository. Usage: tests/composer.sh <identity_api-*.zip>
 set -euo pipefail
 
 ARCHIVE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
@@ -17,7 +17,11 @@ curl -fsSL "https://github.com/roundcube/roundcubemail/releases/download/$RC_VER
   | tar -xz -C "$RC" --strip-components=1
 
 cp "$ARCHIVE" "$WORK/composer-repo/"
-node "$ROOT/scripts/composer-repo.js" "http://127.0.0.1:$PORT/{file}" "9.9.9=$ARCHIVE" > "$WORK/composer-repo/packages.json"
+php -r '$j = json_decode(file_get_contents($argv[1]), true);
+  $j["version"] = "9.9.9";
+  $j["dist"] = ["type" => "zip", "url" => $argv[2], "shasum" => sha1_file($argv[3])];
+  echo json_encode(["packages" => [$j["name"] => ["9.9.9" => $j]]], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);' \
+  "$ROOT/composer.json" "http://127.0.0.1:$PORT/$(basename "$ARCHIVE")" "$ARCHIVE" > "$WORK/composer-repo/packages.json"
 php -S "127.0.0.1:$PORT" -t "$WORK/composer-repo" >"$WORK/composer-repo.log" 2>&1 &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null' EXIT
@@ -40,9 +44,10 @@ FAIL=0
 for f in identity_api.php identity_api.js lib/identity_api_generator.php localization/en_US.inc config.inc.php; do
   if [ -f "plugins/identity_api/$f" ]; then echo "ok   plugins/identity_api/$f"; else echo "FAIL plugins/identity_api/$f missing"; FAIL=1; fi
 done
-if [ -e plugins/identity_api/plugin ] || [ -e plugins/identity_api/extension ]; then
-  echo "FAIL repository layout instead of the plugin installed"; FAIL=1
-fi
+# development files are not part of the package (export-ignore in .gitattributes)
+for f in tests docs Makefile .github; do
+  if [ -e "plugins/identity_api/$f" ]; then echo "FAIL plugins/identity_api/$f installed"; FAIL=1; fi
+done
 php -l plugins/identity_api/identity_api.php >/dev/null && echo "ok   php -l" || FAIL=1
 
 [ "$FAIL" = 0 ] && echo "Composer install OK" || echo "Composer install FAILED"

@@ -1,6 +1,6 @@
 <?php
 
-// Standalone tests: php plugin/tests/generator_test.php
+// Standalone tests: php tests/generator_test.php
 require_once __DIR__ . '/../lib/identity_api_generator.php';
 
 $failed = 0;

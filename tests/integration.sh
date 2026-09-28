@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Integration test: runs Roundcube (SQLite or MySQL) with the identity_api
 # plugin and exercises the REST API over HTTP.
+#   CLIENT_TEST=<command>: also runs the tests of an API client against it, see the end
 #   WEB=php (default): PHP's built-in server with tests/router.php
 #   WEB=nginx, WEB=apache: the web server with PHP-FPM and the rewrite rule
 #   from the README (needs nginx or apache2 and php-fpm, see start_web below)
@@ -18,7 +19,7 @@ if [ ! -d "$RC" ]; then
     | tar -xz -C "$WORK"
 fi
 
-ln -sfn "$ROOT/plugin" "$RC/plugins/identity_api"
+ln -sfn "$ROOT" "$RC/plugins/identity_api"
 mkdir -p "$RC/db" "$RC/logs"
 cat > "$RC/config/config.inc.php" <<'PHP'
 <?php
@@ -197,7 +198,7 @@ show_logs() {
 }
 cleanup() {
   local status=$?
-  kill ${SERVER:-} ${FPM_PID:-} ${IMAP:-} ${SHOP:-} 2>/dev/null || true
+  kill ${SERVER:-} ${FPM_PID:-} ${IMAP:-} 2>/dev/null || true
   rm -rf "${SOCKDIR:-/nonexistent}"
   [ "$status" = 0 ] || show_logs
 }
@@ -428,49 +429,42 @@ check "unrotated expired"   401 '"code":"unauthorized"' "${B[@]}" "${V1}/v1/me"
 REMAINING=$(php -r '$p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null); echo count(unserialize($p->query("SELECT preferences FROM users WHERE user_id = 1")->fetchColumn())["identity_api_tokens"] ?? []);' "$RC")
 if [ "$REMAINING" = "0" ]; then echo "ok   expired token removed"; else echo "FAIL tokens left: $REMAINING"; FAIL=1; fi
 
-# the extension's API client rotates automatically
-CLIENT_TOKEN=$(php -r '
-  $p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null);
-  $prefs = unserialize($p->query("SELECT preferences FROM users WHERE user_id = 1")->fetchColumn());
-  $secret = rtrim(strtr(base64_encode(random_bytes(32)), "+/", "-_"), "=");
-  $prefs["identity_api_tokens"]["c11e0001"] = ["label" => "client", "hash" => hash("sha256", $secret),
-    "created" => time() - 50 * 86400, "issued" => time() - 40 * 86400, "last_used" => 0];
-  $st = $p->prepare("UPDATE users SET preferences = ? WHERE user_id = 1");
-  $st->execute([serialize($prefs)]);
-  echo "1.c11e0001.$secret";
-' "$RC")
-if command -v node >/dev/null; then
-  node "$ROOT/tests/rotation-client.js" "$V1/" "$CLIENT_TOKEN" || FAIL=1
-else
-  echo "skip client rotation test (node not installed)"
-fi
-
 # settings section (preferences hooks)
-php "$ROOT/plugin/tests/settings_test.php" "$RC" >"$WORK/settings.out" 2>&1 || FAIL=1
+php "$ROOT/tests/settings_test.php" "$RC" >"$WORK/settings.out" 2>&1 || FAIL=1
 grep -v 'Deprecated' "$WORK/settings.out" || true
 
 SESSIONS=$(php -r '$p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null); echo $p->query("SELECT count(*) FROM session")->fetchColumn();' "$RC")
 # only the login page request may have created a session
 if [ "$SESSIONS" -le 1 ]; then echo "ok   no API sessions left"; else echo "FAIL $SESSIONS sessions left"; FAIL=1; fi
 
-# end-to-end test of the real Chromium extension (E2E=1; needs python3, Node.js
-# with Playwright and its Chromium, e.g. npm install playwright && npx playwright install chromium)
-if [ "${E2E:-0}" = 1 ]; then
+# Tests of an API client against this server, e.g. CLIENT_TEST=../browser-identity_api/tests/client.sh
+# for the browser extension. The command gets these environment variables:
+#   API_URL       the API URL (http://127.0.0.1:<port>/api/identity/)
+#   CLIENT_TOKEN  a token of RC_USER that is due for rotation
+#   RC_URL        Roundcube; log in as RC_USER with any password (fake IMAP server,
+#                 needs python3), German user interface
+#   WORK          a directory for its files
+if [ -n "${CLIENT_TEST:-}" ]; then
   IMAP_PORT=$((PORT + 1000))
-  SHOP_PORT=$((PORT + 2000))
-  python3 "$ROOT/tests/e2e/fakeimap.py" "$IMAP_PORT" >"$WORK/imap.log" 2>&1 &
+  python3 "$ROOT/tests/fakeimap.py" "$IMAP_PORT" >"$WORK/imap.log" 2>&1 &
   IMAP=$!
-  php -S "127.0.0.1:$SHOP_PORT" -t "$ROOT/tests/e2e" >"$WORK/shop.log" 2>&1 &
-  SHOP=$!
   # imap_host: Roundcube >= 1.6, default_host/default_port: 1.5
   # German UI like the extension (the settings test above switched the user to en_US)
   php -r '$p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null); $p->exec("UPDATE users SET language = \"de_DE\"");'
   set_config "\$config['language'] = 'de_DE';" "\$config['imap_host'] = 'localhost:$IMAP_PORT';" "\$config['default_host'] = 'localhost';" "\$config['default_port'] = $IMAP_PORT;"
-  node "$ROOT/scripts/build-chrome.js" "$WORK/chrome" >/dev/null
-  rm -rf "$WORK/chromium-profile"
-  wait_http "$SHOP_PORT"
+  CLIENT_TOKEN=$(php -r '
+    $p = new PDO(getenv("PDO_DSN"), getenv("PDO_USER") ?: null, getenv("PDO_PASS") ?: null);
+    $prefs = unserialize($p->query("SELECT preferences FROM users WHERE user_id = 1")->fetchColumn());
+    $secret = rtrim(strtr(base64_encode(random_bytes(32)), "+/", "-_"), "=");
+    $prefs["identity_api_tokens"]["c11e0001"] = ["label" => "client", "hash" => hash("sha256", $secret),
+      "created" => time() - 50 * 86400, "issued" => time() - 40 * 86400, "last_used" => 0];
+    $st = $p->prepare("UPDATE users SET preferences = ? WHERE user_id = 1");
+    $st->execute([serialize($prefs)]);
+    echo "1.c11e0001.$secret";
+  ' "$RC")
   for _ in $(seq 50); do (exec 3<>"/dev/tcp/127.0.0.1/$IMAP_PORT") 2>/dev/null && break; sleep 0.1; done
-  node "$ROOT/tests/e2e/chromium-extension.test.js" "$WORK/chrome" "http://127.0.0.1:$PORT/" "$SHOP_PORT" user@example.org "$WORK" || FAIL=1
+  API_URL="$V1/" CLIENT_TOKEN="$CLIENT_TOKEN" RC_URL="http://127.0.0.1:$PORT/" RC_USER=user@example.org WORK="$WORK" \
+    bash -c "$CLIENT_TEST" || FAIL=1
   set_config
 fi
 

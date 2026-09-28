@@ -2,10 +2,14 @@
 
 ## Unreleased
 
-* The repository is now `michael-dev/browser-identity_api` (before: `ff-rc-identity`, GitHub
-  redirects the old links); the Roundcube plugin is also published as its own repository
-  `michael-dev/roundcube-identity_api` for Packagist. The add-on ID `shop-adressen@ff-rc-identity`
-  stays, so installed extensions keep receiving updates.
+* The plugin has its own repository, `michael-dev/roundcube-identity_api`, with `composer.json` at
+  its root, and is installed from Packagist: `composer require michael-dev/identity_api`. The
+  Composer repository in the releases of the extension (`…/releases/latest/download`) is no longer
+  updated; remove it with `composer config --unset repositories.identity_api`.
+* The browser extension “Shop-Adressen” lives on in
+  [browser-identity_api](https://github.com/michael-dev/browser-identity_api) (before:
+  `ff-rc-identity`). Up to 2.2 this changelog covers both.
+* The release archives are made with `git archive` (without tests and docs).
 
 ## 2.2
 

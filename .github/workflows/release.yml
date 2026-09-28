@@ -1,0 +1,79 @@
+name: Release
+
+# Run it manually (Actions > Release > Run workflow) with a version like "2.3"
+# (the tag is created on the selected branch's commit), or push such a tag.
+# Packagist picks up the tag by itself; the GitHub release carries the plugin
+# archives for manual installation.
+on:
+  push:
+    tags: ['v[0-9]*', '[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag, e.g. 2.3 (created on the selected branch if missing)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check tag and release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! [[ "$TAG" =~ ^v?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){1,3}$ ]]; then
+            echo "::error::Tag '$TAG' is not a version (e.g. 2.3 or 2.3.1)"; exit 1
+          fi
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG exists already. Release a new version instead."; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git checkout -q "refs/tags/$TAG"
+          else
+            echo "Tag $TAG does not exist yet, it will be created on $(git rev-parse --short HEAD)"
+          fi
+          echo "TARGET=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite, intl, mbstring
+          tools: none
+
+      - name: Tests
+        run: |
+          for f in *.php lib/*.php localization/*.inc config.inc.php.dist tests/*.php; do php -l "$f" >/dev/null; done
+          make test
+          make integration-test
+
+      - name: Archives
+        run: make archive VERSION="$VERSION"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          Install with Composer from the Roundcube directory: \`composer require michael-dev/identity_api:^$VERSION\`,
+          or extract \`identity_api-$VERSION.tar.gz\` (or \`.zip\`) into \`plugins/\`.
+
+          See the [README](https://github.com/$GITHUB_REPOSITORY/blob/$TAG/README.md) for setup and the [CHANGELOG](https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md) for changes.
+
+          NOTES
+          gh release create "$TAG" --title "$VERSION" --notes-file notes.md --target "$TARGET" \
+            "dist/identity_api-$VERSION.tar.gz" "dist/identity_api-$VERSION.zip"

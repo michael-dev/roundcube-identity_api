@@ -7,7 +7,8 @@ info:
     REST API a mail server offers to create per-shop e-mail addresses (identities, aliases) of the
     logged in account on the fly. The browser extension "Shop-Adressen" works with any server that
     implements it; the Roundcube plugin `identity_api` is the reference implementation. What a client
-    minimally needs is described in the README (*Other mail servers*).
+    minimally needs is described in the README of the extension:
+    <https://github.com/michael-dev/browser-identity_api#other-mail-servers>.
 
     **Base URL.** Any URL, shown to the user by the server, e.g.
     `https://webmail.example.org/api/identity/v1/identities` (Roundcube: `<roundcube-url>/api/identity`,
@@ -30,7 +31,7 @@ info:
     name: GPL-3.0-or-later
     identifier: GPL-3.0-or-later
   contact:
-    url: https://github.com/michael-dev/browser-identity_api
+    url: https://github.com/michael-dev/roundcube-identity_api
 servers:
   - url: 'https://{host}/api/identity'
     description: Example (Roundcube plugin at the root of its host); other servers use their own URL

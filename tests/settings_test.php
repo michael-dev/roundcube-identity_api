@@ -1,7 +1,7 @@
 <?php
 
 // Tests the settings section (preferences hooks) with Roundcube's own classes.
-// Usage: php plugin/tests/settings_test.php <roundcube-dir> (user 1 must exist), see tests/integration.sh
+// Usage: php tests/settings_test.php <roundcube-dir> (user 1 must exist), see tests/integration.sh
 $rc_dir = realpath($argv[1]);
 chdir($rc_dir);
 define('INSTALL_PATH', $rc_dir . '/');
