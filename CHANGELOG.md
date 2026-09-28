@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.2 (unreleased)
+## 2.2
 
 * **The browser extension is no longer tied to Roundcube:** it is called “Shop-Adressen” (before:
   “Shop-Adressen für Roundcube”) and works with every mail server offering the shop address API
